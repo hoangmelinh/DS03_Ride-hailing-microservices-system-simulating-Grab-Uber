@@ -4,6 +4,24 @@ server:
 spring:
   application:
     name: driver-service
+  datasource:
+    url: ${DB_DRIVER_URL:jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${DB_DRIVER_NAME:goride_driver}}
+    username: ${POSTGRES_USER:goride_admin}
+    password: ${POSTGRES_PASSWORD:goride_dev_password}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    locations: classpath:db/migration
 
 management:
   endpoints:

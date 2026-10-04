@@ -48,22 +48,22 @@ Theo trao đổi với giảng viên, giao diện không phải trọng tâm. V�
 
 - Tách rõ test concurrency, reliability, security và performance.
 
-# 2. Phạm vi chức năng
+# 2. Phạm vi chức năng & Kỹ thuật phân tán tích hợp
 
-Phạm vi được chia thành Mandatory Core và Optional. Nhóm chỉ mở rộng Optional khi toàn bộ mandatory flow, failure cases và test evidence đã ổn định.
+Toàn bộ các kỹ thuật phân tán nâng cao (Transactional Outbox, Inbox Idempotent Consumer, Persistent Saga Orchestration, Dead-Letter Queue & Re-drive, Concurrency Atomic Reservation, Redis GEO Spatial Lookup, Dynamic Pricing) được tích hợp trực tiếp thành các yêu cầu kỹ thuật bắt buộc của hệ thống, không xem là tính năng phụ hay tùy chọn hoãn lại:
 
-| **Phạm vi**             | **Chức năng**                                                                 | **Mức độ**                |
-|-------------------------|-------------------------------------------------------------------------------|---------------------------|
-| Identity/User           | Đăng ký, đăng nhập, role Passenger/Driver; JWT                                | Bắt buộc                  |
-| Driver                  | Online/offline, trạng thái, vị trí giả lập, reserve/accept/reject             | Bắt buộc                  |
-| Trip                    | Tạo yêu cầu chuyến, vòng đời chuyến, trạng thái thanh toán                    | Bắt buộc                  |
-| Matching                | Tìm driver khả dụng, reserve driver atomically, chọn driver khác khi thất bại | Bắt buộc                  |
-| Payment                 | Thanh toán giả lập success/fail; không tích hợp cổng thanh toán thật          | Bắt buộc                  |
-| Notification            | Consume event và lưu/thể hiện thông báo giả lập                               | Bắt buộc                  |
-| Demo Client             | Passenger panel, Driver panel, System Monitor                                 | Bắt buộc                  |
-| Map/GPS thật            | Google Maps, GPS streaming, route visualization                               | Ngoài phạm vi             |
-| Kubernetes/Service Mesh | Triển khai nâng cao                                                           | Chỉ làm nếu còn thời gian |
-| Dynamic pricing         | Surge pricing phức tạp                                                        | Optional                  |
+| **Phạm vi**                   | **Chức năng & Cơ chế phân tán**                                                                                                     | **Mức độ**    |
+|-------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|---------------|
+| Identity/User                 | Đăng ký, đăng nhập, role Passenger/Driver; JWT; Transactional Outbox phát hành sự kiện tạo tài khoản.                               | Bắt buộc      |
+| Driver                        | Online/offline, cập nhật vị trí, atomic conditional reservation, bảo vệ invariant độc quyền chuyến đi; Outbox/Inbox.                 | Bắt buộc      |
+| Trip                          | Tạo yêu cầu chuyến, quản lý trạng thái vòng đời chuyến, thanh toán, idempotency record; Outbox/Inbox.                               | Bắt buộc      |
+| Matching & Saga               | Quản lý vòng đời Saga phân tán (PostgreSQL), tìm ứng viên tài xế gần nhất qua Redis GEO, atomic reserve driver, compensation.       | Bắt buộc      |
+| Payment                       | Xử lý thanh toán mô phỏng (success/fail/retry), bảo vệ idempotency bằng `payments.trip_id` UNIQUE; Outbox/Inbox.                    | Bắt buộc      |
+| Notification                  | Nhận event bất đồng bộ, lưu thông báo, deduplication bằng composite unique constraint; Inbox.                                      | Bắt buộc      |
+| Reliability & Fault Tolerance | Transactional Outbox (triệt tiêu dual-write), Inbox (chống duplicate), Dead-Letter Queue (DLQ), lưu `dead_letter_messages`, Re-drive. | Bắt buộc      |
+| Dynamic Pricing               | Thuật toán định giá động (Surge Pricing) tính toán dựa trên tỷ lệ cung/cầu khu vực và khoảng cách chuyến đi.                        | Bắt buộc      |
+| Demo Client                   | Passenger panel, Driver panel, System Monitor (quan sát trạng thái phân tán, event stream, correlationId, DLQ Re-drive).             | Bắt buộc      |
+| Map/GPS thật                  | Google Maps SDK thương mại, GPS streaming vệ tinh vật lý.                                                                           | Ngoài phạm vi |
 
 ## 2.1. Giao diện tối thiểu phục vụ demo
 
@@ -127,15 +127,15 @@ flowchart TD
 
 ## 4.1. Trách nhiệm của từng service
 
-| **Service**          | **Trách nhiệm chính**                                                           | **Dữ liệu sở hữu**                                   |
-|----------------------|---------------------------------------------------------------------------------|------------------------------------------------------|
-| API Gateway          | Routing, auth filter, propagate correlationId. Không chứa business logic.       | Không bắt buộc DB                                    |
-| User Service         | User, credential, role Passenger/Driver, profile cơ bản.                        | users, roles                                         |
-| Driver Service       | Driver status, simulated location, current trip, atomic reservation.            | drivers, driver_status_history                       |
-| Trip Service         | Nguồn sự thật của Trip lifecycle; nhận kết quả matching/payment.                | trips, trip_status_history                           |
-| Matching Service     | Nhận TRIP_CREATED, tìm candidate, gọi Driver Service reserve. Có thể stateless. | Không bắt buộc; nếu lưu thì matching_attempt/history |
-| Payment Service      | Thanh toán giả lập và publish kết quả.                                          | payments                                             |
-| Notification Service | Consume event và tạo notification giả lập.                                      | notifications, processed_event                       |
+| **Service**          | **Trách nhiệm chính**                                                                                         | **Dữ liệu sở hữu**                                                                                                            |
+|----------------------|---------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------|
+| API Gateway          | Routing, auth filter, propagate correlationId. Không chứa business logic.                                     | Không có DB (Stateless)                                                                                                       |
+| User Service         | User, credential, role Passenger/Driver, refresh token, outbox reliability.                                   | `users`, `roles`, `user_roles`, `refresh_tokens`, `outbox_event`                                                              |
+| Driver Service       | Driver status, location mới nhất, vehicle, atomic reservation, idempotency, outbox/inbox/DLQ.                 | `drivers`, `vehicles`, `driver_locations`, `driver_reservations`, `outbox_event`, `inbox_event`, `idempotency_record`, `dead_letter_messages` |
+| Trip Service         | Nguồn sự thật vòng đời Trip; pricing; gán driver; idempotency; outbox/inbox/DLQ.                              | `trips`, `trip_status_history`, `outbox_event`, `inbox_event`, `idempotency_record`, `dead_letter_messages`                     |
+| Matching Service     | Saga Orchestrator cho ghép cuốc; truy vấn Redis GEO tìm ứng viên; reserve driver; compensation khi thất bại.  | `matching_sagas`, `matching_attempts`, `outbox_event`, `inbox_event`, `dead_letter_messages` (PostgreSQL + Redis GEO)         |
+| Payment Service      | Thanh toán mô phỏng (success/fail); idempotency; outbox/inbox/DLQ.                                            | `payments`, `payment_attempts`, `outbox_event`, `inbox_event`, `idempotency_record`, `dead_letter_messages`                    |
+| Notification Service | Consume event và lưu trữ thông báo phân tán; deduplication bằng composite unique; inbox/DLQ.                  | `notifications`, `inbox_event`, `dead_letter_messages`                                                                        |
 
 ## 4.2. Database ownership
 
@@ -366,9 +366,9 @@ Mục tiêu UI là giúp giảng viên nhìn thấy “ai kích hoạt gì” v�
 |----------------|-------------------------------------------------|-------------------------------------------------------------------|
 | Passenger      | Request Ride, Cancel                            | Trip ID, pickup/destination, assigned driver, status.             |
 | Driver         | Online/Offline, Accept, Reject, Start, Complete | Driver status, current trip, simulated location.                  |
-| System Monitor | Refresh/auto-poll hoặc WebSocket optional       | Event type, service, correlationId, timestamp, retry/error state. |
+| System Monitor | Auto-poll / WebSocket feed, nút kích hoạt Re-drive DLQ | Event stream, service node, correlationId, timestamp, Saga state, Dead-Letter messages & Retry counter. |
 
-Nếu thiếu thời gian, System Monitor có thể chỉ hiển thị business state còn log kỹ thuật xem trực tiếp bằng terminal/RabbitMQ Management UI. Swagger/Postman vẫn nên giữ làm công cụ dự phòng khi frontend lỗi.
+System Monitor được thiết kế làm trung tâm quan sát thời gian thực của hệ thống phân tán, trực quan hóa luồng sự kiện qua Message Queue, trạng thái Saga, các bản ghi lỗi trong Dead Letter Queue và cung cấp khả năng kích hoạt Re-drive xử lý lại lỗi trực tiếp trên giao diện. Swagger/Postman đồng thời được duy trì đầy đủ để kiểm thử độc lập các API hợp đồng.
 
 # 13. Kịch bản demo bắt buộc và nên chuẩn bị
 
@@ -444,8 +444,8 @@ Kế hoạch mới ưu tiên hoàn thành core distributed mechanisms sớm, tr�
 | 1        | 28/09–04/10   | Requirements + architecture + state machine + service/data ownership + event contract. | requirements.md, architecture.md, diagrams, task assignment |
 | 2        | 05/10–11/10   | Skeleton toàn bộ service, Docker Compose, DB riêng, RabbitMQ, Gateway/JWT cơ bản.      | docker compose up chạy toàn bộ; producer/consumer sample    |
 | 3        | 12/10–18/10   | User + Driver + Trip core; driver status/location; trip create.                        | REST APIs + DB migration + basic tests                      |
-| 4        | 19/10–25/10   | Matching + atomic reservation + accept/reject + Notification.                          | Happy flow đến DRIVER_ASSIGNED/ACCEPTED                     |
-| 5        | 26/10–01/11   | Payment + event-driven flow + Saga + idempotency + retry/DLQ + correlation ID.         | Distributed mechanisms hoạt động end-to-end                 |
+| 4        | 19/10–25/10   | Matching + atomic reservation + Redis GEO lookup + Notification; tích hợp Outbox/Inbox.| Happy flow đến DRIVER_ASSIGNED/ACCEPTED + GEO search        |
+| 5        | 26/10–01/11   | Payment + Transactional Outbox + Inbox Idempotent Consumer + Persistent Saga + DLQ/Re-drive. | Distributed mechanisms hoạt động end-to-end với độ tin cậy cao|
 | 6        | 02/11–08/11   | Concurrency, fault injection, recovery, security; hoàn thiện Demo Client tối giản.     | C01/C02, R01/R02, S01–S03 chạy được                         |
 | 7        | 09/11–15/11   | Integration test, performance, bug fix, log/tracing, feature freeze.                   | Test evidence + k6 results + release candidate              |
 | 8        | 16/11–22/11   | Report, README, slides, demo script, oral rehearsal, final tag.                        | report.pdf, source, slides, v1.0.0                          |
@@ -533,11 +533,11 @@ README phải có cách chạy lại hệ thống từ đầu, demo scenarios v�
 |------------------------------------------|---------------------------------------------------------------------------------------------|
 | Mất thời gian UI                         | Giữ UI tối giản; ưu tiên Swagger/Postman làm fallback.                                      |
 | RabbitMQ tích hợp quá muộn               | Có broker + producer/consumer từ tuần 2.                                                    |
-| Quá nhiều service nhưng service rỗng     | Giữ trách nhiệm rõ; Matching có thể stateless thay vì tạo DB vô nghĩa.                      |
+| Quá nhiều service nhưng service rỗng     | Giữ trách nhiệm rõ; Matching Service đảm nhiệm vai trò Saga Orchestrator với database riêng (`goride_matching`) để persist saga state, lịch sử matching attempt, outbox và DLQ messages, đảm bảo khả năng chịu lỗi và rollback phân tán an toàn. |
 | Saga khó giải thích                      | Dùng reserve driver/assign trip/release driver; không dùng payment rollback trip completed. |
 | Retry gây xử lý trùng                    | Persistent dedup + eventId unique.                                                          |
 | Demo phụ thuộc dữ liệu ngẫu nhiên        | Seed sẵn driver/passenger/location; demo script deterministically.                          |
-| Thêm Kubernetes/Redis/Kafka vì “cho xịn” | Không thêm nếu không giải quyết requirement cụ thể.                                         |
+| Thêm công nghệ không phục vụ mục tiêu kiến trúc | Chỉ sử dụng các công nghệ đã được chốt trong kiến trúc (PostgreSQL, RabbitMQ, Redis cho GEO projection); không thêm phụ thuộc dư thừa ngoài mục tiêu đã duyệt. |
 | Một người làm gần hết                    | Chia service + test evidence + PR từ đầu, review chéo architecture.                         |
 
 # 21. Checklist trước khi nộp/demo
