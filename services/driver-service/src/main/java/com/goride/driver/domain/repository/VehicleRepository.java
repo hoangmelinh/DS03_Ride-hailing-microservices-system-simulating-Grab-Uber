@@ -6,9 +6,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-/**
- * Domain Repository interface for Vehicle entity.
- */
 public interface VehicleRepository {
 
     Optional<Vehicle> findById(UUID id);

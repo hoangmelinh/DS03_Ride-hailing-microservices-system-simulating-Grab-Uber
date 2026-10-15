@@ -4,10 +4,6 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
-/**
- * Driver Aggregate Root (Clean Architecture Domain Entity).
- * Pure Java class with zero framework dependencies (No Spring, JPA, Hibernate).
- */
 public class Driver {
 
     private final UUID id;
@@ -21,8 +17,8 @@ public class Driver {
     private Instant updatedAt;
 
     public Driver(UUID id, UUID userId, String licenseNumber, DriverStatus status,
-                  UUID currentTripId, Instant reservedUntil, long version,
-                  Instant createdAt, Instant updatedAt) {
+            UUID currentTripId, Instant reservedUntil, long version,
+            Instant createdAt, Instant updatedAt) {
         this.id = Objects.requireNonNull(id, "id must not be null");
         this.userId = Objects.requireNonNull(userId, "userId must not be null");
         this.licenseNumber = Objects.requireNonNull(licenseNumber, "licenseNumber must not be null");
@@ -45,8 +41,7 @@ public class Driver {
                 null,
                 0L,
                 now,
-                now
-        );
+                now);
     }
 
     public void goOnline() {

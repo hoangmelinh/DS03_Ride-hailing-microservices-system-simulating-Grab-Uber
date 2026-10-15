@@ -4,10 +4,6 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
-/**
- * Driver Reservation Domain Entity.
- * Represents an active, confirmed, released, or expired reservation lock for a trip.
- */
 public class DriverReservation {
 
     private final UUID id;
@@ -24,9 +20,9 @@ public class DriverReservation {
     private Instant updatedAt;
 
     public DriverReservation(UUID id, UUID driverId, UUID tripId, ReservationStatus status,
-                             String idempotencyKey, UUID correlationId, Instant reservedAt,
-                             Instant expiresAt, Instant confirmedAt, Instant releasedAt,
-                             Instant createdAt, Instant updatedAt) {
+            String idempotencyKey, UUID correlationId, Instant reservedAt,
+            Instant expiresAt, Instant confirmedAt, Instant releasedAt,
+            Instant createdAt, Instant updatedAt) {
         this.id = Objects.requireNonNull(id, "id must not be null");
         this.driverId = Objects.requireNonNull(driverId, "driverId must not be null");
         this.tripId = Objects.requireNonNull(tripId, "tripId must not be null");
@@ -42,7 +38,7 @@ public class DriverReservation {
     }
 
     public static DriverReservation create(UUID driverId, UUID tripId, String idempotencyKey,
-                                           UUID correlationId, Instant expiresAt) {
+            UUID correlationId, Instant expiresAt) {
         Instant now = Instant.now();
         return new DriverReservation(
                 UUID.randomUUID(),
@@ -56,8 +52,7 @@ public class DriverReservation {
                 null,
                 null,
                 now,
-                now
-        );
+                now);
     }
 
     public void confirm() {

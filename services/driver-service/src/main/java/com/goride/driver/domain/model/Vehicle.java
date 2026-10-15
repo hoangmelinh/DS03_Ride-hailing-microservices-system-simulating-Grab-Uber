@@ -4,10 +4,6 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
-/**
- * Vehicle Domain Entity.
- * Pure Java class with zero framework dependencies.
- */
 public class Vehicle {
 
     private final UUID id;
@@ -22,8 +18,8 @@ public class Vehicle {
     private Instant updatedAt;
 
     public Vehicle(UUID id, UUID driverId, String plateNumber, String brand,
-                   String model, String color, int capacity, VehicleStatus status,
-                   Instant createdAt, Instant updatedAt) {
+            String model, String color, int capacity, VehicleStatus status,
+            Instant createdAt, Instant updatedAt) {
         this.id = Objects.requireNonNull(id, "id must not be null");
         this.driverId = Objects.requireNonNull(driverId, "driverId must not be null");
         this.plateNumber = Objects.requireNonNull(plateNumber, "plateNumber must not be null");

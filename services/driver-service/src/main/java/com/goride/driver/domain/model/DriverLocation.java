@@ -5,10 +5,6 @@ import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 
-/**
- * Driver Location Value Object / Domain Entity.
- * Pure Java class representing the latest position of a driver in PostgreSQL.
- */
 public class DriverLocation {
 
     private final UUID driverId;
