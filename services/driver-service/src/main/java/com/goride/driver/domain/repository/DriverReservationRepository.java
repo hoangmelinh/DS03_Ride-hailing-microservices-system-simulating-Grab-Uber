@@ -5,9 +5,6 @@ import com.goride.driver.domain.model.DriverReservation;
 import java.util.Optional;
 import java.util.UUID;
 
-/**
- * Domain Repository interface for DriverReservation entity.
- */
 public interface DriverReservationRepository {
 
     Optional<DriverReservation> findById(UUID id);
