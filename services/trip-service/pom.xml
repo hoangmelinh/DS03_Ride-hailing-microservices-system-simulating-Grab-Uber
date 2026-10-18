@@ -19,6 +19,12 @@
     <description>Trip lifecycle, passenger requests, driver assignment and fare state bounded context</description>
 
     <dependencies>
+        <!-- Common Technical Library (ApiResponse, EventEnvelope, Exceptions, Handlers) -->
+        <dependency>
+            <groupId>com.goride</groupId>
+            <artifactId>goride-common</artifactId>
+        </dependency>
+
         <!-- Spring Boot Starter Web for REST endpoints -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
