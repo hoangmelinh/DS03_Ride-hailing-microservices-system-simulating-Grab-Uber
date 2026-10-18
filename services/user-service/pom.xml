@@ -19,6 +19,12 @@
     <description>User identity, authentication and profile management bounded context</description>
 
     <dependencies>
+        <!-- Common Technical Library (ApiResponse, EventEnvelope, Exceptions, Handlers) -->
+        <dependency>
+            <groupId>com.goride</groupId>
+            <artifactId>goride-common</artifactId>
+        </dependency>
+
         <!-- Spring Boot Starter Web for REST endpoints -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
