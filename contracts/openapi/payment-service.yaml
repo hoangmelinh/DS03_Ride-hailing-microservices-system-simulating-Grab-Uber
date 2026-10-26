@@ -1,0 +1,198 @@
+openapi: 3.0.3
+info:
+  title: GoRide - Payment Service API
+  description: REST API contract for payment processing and retrieval in GoRide Distributed System.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8085
+    description: Local Payment Service Direct Port
+  - url: http://localhost:8080/payment-service
+    description: Via API Gateway
+
+paths:
+  /api/v1/payments/process:
+    post:
+      summary: Process Payment (Simulated / Mock)
+      description: |
+        Processes payment for a ride-hailing trip.
+        Guaranteed to be idempotent: repeated calls with the same tripId will return the existing completed payment record without creating duplicates.
+      operationId: processPayment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProcessPaymentRequest'
+      responses:
+        '200':
+          description: Payment processed successfully or existing idempotent record returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentApiResponse'
+        '400':
+          description: Validation error or invalid request payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+        '409':
+          description: Conflict or database constraint violation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+
+  /api/v1/payments/{tripId}:
+    get:
+      summary: Get Payment By Trip ID
+      description: Retrieves the payment transaction details for a specified trip.
+      operationId: getPaymentByTripId
+      parameters:
+        - name: tripId
+          in: path
+          required: true
+          description: Unique identifier of the trip
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Payment details found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentApiResponse'
+        '404':
+          description: Payment not found for the given tripId
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+
+components:
+  schemas:
+    ProcessPaymentRequest:
+      type: object
+      required:
+        - tripId
+        - passengerId
+        - amount
+        - paymentMethod
+      properties:
+        tripId:
+          type: string
+          format: uuid
+          description: Identifier of the trip to be paid
+          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        passengerId:
+          type: string
+          format: uuid
+          description: Identifier of the passenger paying
+          example: "8fa34e71-7968-49b6-9e73-ade99fe667cd"
+        amount:
+          type: number
+          format: decimal
+          minimum: 1000.00
+          description: Payment amount in VND (minimum 1,000 VND)
+          example: 50000.00
+        paymentMethod:
+          type: string
+          description: Payment method (e.g. MOCK_WALLET, CASH, SIMULATED_CARD)
+          example: "MOCK_WALLET"
+
+    PaymentResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "ad8e79b5-506a-43d5-ae46-89aa4d4437fc"
+        tripId:
+          type: string
+          format: uuid
+          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        passengerId:
+          type: string
+          format: uuid
+          example: "8fa34e71-7968-49b6-9e73-ade99fe667cd"
+        amount:
+          type: number
+          format: decimal
+          example: 50000.00
+        currency:
+          type: string
+          example: "VND"
+        status:
+          type: string
+          enum: [PENDING, PROCESSING, SUCCEEDED, FAILED]
+          example: "SUCCEEDED"
+        provider:
+          type: string
+          example: "MOCK_WALLET"
+        providerReference:
+          type: string
+          example: "SIM-PAY-12345"
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+
+    PaymentApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/PaymentResponse'
+        error:
+          type: object
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+
+    ErrorDetails:
+      type: object
+      properties:
+        code:
+          type: string
+          example: "VALIDATION_ERROR"
+        message:
+          type: string
+          example: "Invalid request arguments"
+        details:
+          type: array
+          items:
+            type: string
+          example: ["amount: amount must be at least 1,000 VND"]
+
+    ErrorApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        data:
+          type: object
+          nullable: true
+        error:
+          $ref: '#/components/schemas/ErrorDetails'
+        timestamp:
+          type: string
+          format: date-time
