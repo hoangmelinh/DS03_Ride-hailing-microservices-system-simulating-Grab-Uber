@@ -1,0 +1,214 @@
+openapi: 3.0.3
+info:
+  title: GoRide - Notification Service API
+  description: REST API contract for simulated notifications and history query in GoRide Distributed System.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8086
+    description: Local Notification Service Direct Port
+  - url: http://localhost:8080/notification-service
+    description: Via API Gateway
+
+paths:
+  /api/v1/notifications/send:
+    post:
+      summary: Send Notification (Simulated / Mock)
+      description: |
+        Sends a simulated push or SMS notification to a specific user and stores it into the database.
+      operationId: sendNotification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendNotificationRequest'
+      responses:
+        '200':
+          description: Notification recorded and sent successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationApiResponse'
+        '400':
+          description: Validation error or invalid request payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+        '409':
+          description: Conflict or database constraint violation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+
+  /api/v1/notifications/{userId}:
+    get:
+      summary: Get Notification History by User ID
+      description: Retrieves the list of notifications sent to a user, ordered by createdAt descending.
+      operationId: getNotificationsByUserId
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          description: Unique identifier of the recipient user
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Notification history retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationListApiResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+
+components:
+  schemas:
+    SendNotificationRequest:
+      type: object
+      required:
+        - userId
+        - title
+        - content
+        - type
+      properties:
+        userId:
+          type: string
+          format: uuid
+          description: Target recipient user identifier
+          example: "8fa34e71-7968-49b6-9e73-ade99fe667cd"
+        title:
+          type: string
+          description: Title of the notification
+          example: "Tài xế đang đến"
+        content:
+          type: string
+          description: Message content of the notification
+          example: "Tài xế Nguyễn Văn A với xe 29A-12345 đang đến đón bạn."
+        type:
+          type: string
+          description: Notification type code
+          example: "DRIVER_ARRIVING"
+        recipientRole:
+          type: string
+          description: Target role of the recipient (PASSENGER, DRIVER)
+          example: "PASSENGER"
+        tripId:
+          type: string
+          format: uuid
+          description: Optional associated trip ID
+          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        channel:
+          type: string
+          enum: [SIMULATED, PUSH, SMS, EMAIL]
+          description: Delivery channel
+          example: "SIMULATED"
+
+    NotificationResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        sourceEventId:
+          type: string
+          format: uuid
+        recipientUserId:
+          type: string
+          format: uuid
+        recipientRole:
+          type: string
+        tripId:
+          type: string
+          format: uuid
+        type:
+          type: string
+        channel:
+          type: string
+          enum: [SIMULATED, PUSH, SMS, EMAIL]
+        status:
+          type: string
+          enum: [PENDING, SENT, FAILED]
+        title:
+          type: string
+        content:
+          type: string
+        payload:
+          type: string
+          description: Raw JSON payload stored in PostgreSQL JSONB
+        attemptCount:
+          type: integer
+        sentAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    NotificationApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/NotificationResponse'
+        error:
+          type: object
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+
+    NotificationListApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationResponse'
+        error:
+          type: object
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+
+    ErrorApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        data:
+          type: object
+          nullable: true
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: "VALIDATION_ERROR"
+            message:
+              type: string
+              example: "userId is required"
+        timestamp:
+          type: string
+          format: date-time
+
