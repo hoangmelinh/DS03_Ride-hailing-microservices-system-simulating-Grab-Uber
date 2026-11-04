@@ -11,10 +11,12 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -152,5 +154,51 @@ class PaymentControllerTest {
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.error.code").value("NOT_FOUND"))
                 .andExpect(jsonPath("$.error.message").value("Payment not found for trip: " + tripId));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/payments/process with unique tripId conflict returns 409 and PAYMENT_ALREADY_EXISTS")
+    void processPayment_UniqueTripIdConflict_Returns409() throws Exception {
+        UUID tripId = UUID.randomUUID();
+        UUID passengerId = UUID.randomUUID();
+        ProcessPaymentRequest request = new ProcessPaymentRequest(
+                tripId, passengerId, new BigDecimal("50000.00"), "MOCK_WALLET"
+        );
+
+        SQLException sqlEx = new SQLException("ERROR: duplicate key value violates unique constraint \"uq_payments_trip_id\"", "23505");
+        org.hibernate.exception.ConstraintViolationException cve =
+                new org.hibernate.exception.ConstraintViolationException("Unique violation", sqlEx, "uq_payments_trip_id");
+        DataIntegrityViolationException dive = new DataIntegrityViolationException("Conflict on tripId", cve);
+
+        when(paymentService.processPayment(any())).thenThrow(dive);
+
+        mockMvc.perform(post("/api/v1/payments/process")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("PAYMENT_ALREADY_EXISTS"))
+                .andExpect(jsonPath("$.error.message").isNotEmpty());
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/payments/process with general data integrity violation returns 409 and DATA_INTEGRITY_VIOLATION")
+    void processPayment_GeneralDataIntegrityViolation_Returns409() throws Exception {
+        UUID tripId = UUID.randomUUID();
+        UUID passengerId = UUID.randomUUID();
+        ProcessPaymentRequest request = new ProcessPaymentRequest(
+                tripId, passengerId, new BigDecimal("50000.00"), "MOCK_WALLET"
+        );
+
+        DataIntegrityViolationException generalDive = new DataIntegrityViolationException("General DB constraint failed");
+
+        when(paymentService.processPayment(any())).thenThrow(generalDive);
+
+        mockMvc.perform(post("/api/v1/payments/process")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("DATA_INTEGRITY_VIOLATION"));
     }
 }

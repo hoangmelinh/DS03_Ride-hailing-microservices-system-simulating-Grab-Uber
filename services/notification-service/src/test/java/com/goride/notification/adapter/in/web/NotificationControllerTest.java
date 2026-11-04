@@ -11,6 +11,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -21,6 +24,7 @@ import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -93,8 +97,8 @@ class NotificationControllerTest {
     }
 
     @Test
-    @DisplayName("GET /api/v1/notifications/{userId} returns 200 with list of notifications")
-    void getNotificationsByUserId_Returns200WithList() throws Exception {
+    @DisplayName("GET /api/v1/notifications/{userId} with default pagination parameters returns 200 and page=0, size=20")
+    void getNotificationsByUserId_DefaultPagination_Returns200WithList() throws Exception {
         UUID userId = UUID.randomUUID();
 
         NotificationResponse noti1 = new NotificationResponse();
@@ -104,8 +108,8 @@ class NotificationControllerTest {
         noti1.setType("TRIP_COMPLETED");
         noti1.setStatus(NotificationStatus.SENT);
 
-        when(notificationService.getNotificationsByUserId(eq(userId)))
-                .thenReturn(List.of(noti1));
+        when(notificationService.getNotificationsByUserId(eq(userId), eq(PageRequest.of(0, 20))))
+                .thenReturn(new PageImpl<>(List.of(noti1)));
 
         mockMvc.perform(get("/api/v1/notifications/{userId}", userId))
                 .andExpect(status().isOk())
@@ -113,6 +117,34 @@ class NotificationControllerTest {
                 .andExpect(jsonPath("$.data").isArray())
                 .andExpect(jsonPath("$.data[0].recipientUserId").value(userId.toString()))
                 .andExpect(jsonPath("$.data[0].title").value("Thông báo 1"));
+
+        verify(notificationService).getNotificationsByUserId(eq(userId), eq(PageRequest.of(0, 20)));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/notifications/{userId} with custom pagination parameters (page=1, size=5) returns 200")
+    void getNotificationsByUserId_CustomPagination_Returns200() throws Exception {
+        UUID userId = UUID.randomUUID();
+
+        NotificationResponse noti2 = new NotificationResponse();
+        noti2.setId(UUID.randomUUID());
+        noti2.setRecipientUserId(userId);
+        noti2.setTitle("Thông báo 2");
+        noti2.setType("PAYMENT_SUCCESS");
+        noti2.setStatus(NotificationStatus.SENT);
+
+        when(notificationService.getNotificationsByUserId(eq(userId), eq(PageRequest.of(1, 5))))
+                .thenReturn(new PageImpl<>(List.of(noti2)));
+
+        mockMvc.perform(get("/api/v1/notifications/{userId}", userId)
+                        .param("page", "1")
+                        .param("size", "5"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.data").isArray())
+                .andExpect(jsonPath("$.data[0].title").value("Thông báo 2"));
+
+        verify(notificationService).getNotificationsByUserId(eq(userId), eq(PageRequest.of(1, 5)));
     }
 
     @Test
@@ -120,14 +152,50 @@ class NotificationControllerTest {
     void getNotificationsByUserId_Empty_Returns200WithEmptyList() throws Exception {
         UUID userId = UUID.randomUUID();
 
-        when(notificationService.getNotificationsByUserId(eq(userId)))
-                .thenReturn(Collections.emptyList());
+        when(notificationService.getNotificationsByUserId(eq(userId), eq(PageRequest.of(0, 20))))
+                .thenReturn(new PageImpl<>(Collections.emptyList()));
 
         mockMvc.perform(get("/api/v1/notifications/{userId}", userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data").isArray())
                 .andExpect(jsonPath("$.data").isEmpty());
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/notifications/{userId} with invalid page < 0 returns 400 with VALIDATION_ERROR")
+    void getNotificationsByUserId_InvalidPage_Returns400() throws Exception {
+        UUID userId = UUID.randomUUID();
+
+        mockMvc.perform(get("/api/v1/notifications/{userId}", userId)
+                        .param("page", "-1"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/notifications/{userId} with invalid size < 1 returns 400 with VALIDATION_ERROR")
+    void getNotificationsByUserId_InvalidSizeBelowOne_Returns400() throws Exception {
+        UUID userId = UUID.randomUUID();
+
+        mockMvc.perform(get("/api/v1/notifications/{userId}", userId)
+                        .param("size", "0"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/notifications/{userId} with invalid size > 100 returns 400 with VALIDATION_ERROR")
+    void getNotificationsByUserId_InvalidSizeAboveMax_Returns400() throws Exception {
+        UUID userId = UUID.randomUUID();
+
+        mockMvc.perform(get("/api/v1/notifications/{userId}", userId)
+                        .param("size", "150"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
     }
 }
 

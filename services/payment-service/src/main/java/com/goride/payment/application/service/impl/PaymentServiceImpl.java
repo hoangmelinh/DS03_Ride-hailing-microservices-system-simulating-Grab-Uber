@@ -12,7 +12,6 @@ import com.goride.payment.infrastructure.persistence.repository.PaymentAttemptRe
 import com.goride.payment.infrastructure.persistence.repository.PaymentRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -68,16 +67,10 @@ public class PaymentServiceImpl implements PaymentService {
         payment.setProviderReference("SIM-PAY-" + UUID.randomUUID());
         payment.setCompletedAt(now);
 
-        PaymentEntity savedPayment;
-        try {
-            savedPayment = paymentRepository.save(payment);
-        } catch (DataIntegrityViolationException ex) {
-            // Concurrency race condition: concurrent request inserted same tripId at the same moment
-            log.warn("Concurrent duplicate payment request detected for tripId={}, recovering existing record", request.getTripId());
-            return paymentRepository.findByTripId(request.getTripId())
-                    .map(PaymentResponse::from)
-                    .orElseThrow(() -> ex);
-        }
+        // Save new PaymentEntity. If a concurrent race condition occurs on unique constraint uq_payments_trip_id,
+        // DataIntegrityViolationException propagates out cleanly to trigger a rollback of this transaction,
+        // avoiding query execution on an aborted PostgreSQL transaction block.
+        PaymentEntity savedPayment = paymentRepository.save(payment);
 
         // 3. Record PaymentAttemptEntity for audit and retry history
         PaymentAttemptEntity attempt = new PaymentAttemptEntity();

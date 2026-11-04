@@ -115,26 +115,19 @@ class PaymentServiceImplTest {
     }
 
     @Test
-    @DisplayName("Concurrency: Recover gracefully when DataIntegrityViolationException occurs on save")
-    void processPayment_ConcurrentRaceCondition_RecoversExisting() {
+    @DisplayName("Concurrency: DataIntegrityViolationException on save propagates out cleanly to rollback transaction")
+    void processPayment_ConcurrentRaceCondition_PropagatesException() {
         when(paymentRepository.findByTripId(tripId)).thenReturn(Optional.empty());
-
-        PaymentEntity concurrentPayment = new PaymentEntity(tripId, passengerId, amount, "VND");
-        concurrentPayment.setId(UUID.randomUUID());
-        concurrentPayment.setStatus(PaymentStatus.SUCCEEDED);
 
         when(paymentRepository.save(any(PaymentEntity.class)))
                 .thenThrow(new DataIntegrityViolationException("Unique constraint violation: uq_payments_trip_id"));
 
-        when(paymentRepository.findByTripId(tripId))
-                .thenReturn(Optional.empty()) // First call in step 1
-                .thenReturn(Optional.of(concurrentPayment)); // Second call in catch block
+        assertThatThrownBy(() -> paymentService.processPayment(request))
+                .isInstanceOf(DataIntegrityViolationException.class);
 
-        PaymentResponse response = paymentService.processPayment(request);
-
-        assertThat(response).isNotNull();
-        assertThat(response.id()).isEqualTo(concurrentPayment.getId());
-        assertThat(response.tripId()).isEqualTo(tripId);
+        verify(paymentRepository).findByTripId(tripId);
+        verify(paymentRepository).save(any(PaymentEntity.class));
+        verify(paymentAttemptRepository, never()).save(any(PaymentAttemptEntity.class));
     }
 
     @Test
