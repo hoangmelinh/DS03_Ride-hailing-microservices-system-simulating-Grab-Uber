@@ -61,12 +61,14 @@ public class UserEntity {
     }
 
     public UserEntity(UUID id, String phone, String email, String passwordHash, String fullName, UserStatus status) {
-        this.id = id;
+        this.id = id != null ? id : UUID.randomUUID();
         this.phone = phone;
         this.email = email;
         this.passwordHash = passwordHash;
         this.fullName = fullName;
         this.status = status != null ? status : UserStatus.ACTIVE;
+        this.createdAt = Instant.now();
+        this.updatedAt = Instant.now();
     }
 
     @PrePersist
