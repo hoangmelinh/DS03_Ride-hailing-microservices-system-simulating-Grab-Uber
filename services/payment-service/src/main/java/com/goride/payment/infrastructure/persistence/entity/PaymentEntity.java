@@ -15,6 +15,8 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -49,6 +51,7 @@ public class PaymentEntity {
     @Column(name = "amount", precision = 12, scale = 2, nullable = false)
     private BigDecimal amount;
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "currency", length = 3, columnDefinition = "char(3)", nullable = false)
     private String currency = "VND";
 
