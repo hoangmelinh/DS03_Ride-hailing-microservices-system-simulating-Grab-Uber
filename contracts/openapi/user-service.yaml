@@ -1,0 +1,314 @@
+openapi: 3.0.3
+info:
+  title: GoRide - User Service API
+  description: REST API contract for user identity, authentication, JWT tokens, and profiles in GoRide Distributed System.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8081
+    description: Local User Service Direct Port
+  - url: http://localhost:8080/user-service
+    description: Via API Gateway
+
+paths:
+  /api/v1/auth/register:
+    post:
+      summary: Register a new user account
+      description: |
+        Registers a passenger or driver account. 
+        Hashes password with BCrypt, stores user entity, and creates transactional outbox event 'user.registered'.
+      operationId: register
+      parameters:
+        - name: X-Correlation-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Distributed tracing correlation ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User registered successfully, tokens issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthApiResponse'
+        '400':
+          description: Validation error or invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+        '409':
+          description: Conflict - Phone number or email already registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+
+  /api/v1/auth/login:
+    post:
+      summary: Authenticate user credentials
+      description: Validates phone/email and password, returning JWT Access Token and Refresh Token.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthApiResponse'
+        '400':
+          description: Invalid request payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+        '403':
+          description: Account is locked or disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+
+  /api/v1/auth/refresh:
+    post:
+      summary: Refresh Access Token
+      description: Validates an existing refresh token and performs token rotation, returning new tokens.
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: Token refresh successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthApiResponse'
+        '401':
+          description: Invalid, revoked, or expired refresh token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+
+  /api/v1/users/me:
+    get:
+      summary: Get Current User Profile
+      description: Retrieves the profile of the currently authenticated user identified by JWT or X-User-Id header.
+      operationId: getMyProfile
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: X-User-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Authenticated user identity forwarded by API Gateway
+      responses:
+        '200':
+          description: User profile retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfileApiResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    RegisterRequest:
+      type: object
+      required:
+        - phone
+        - password
+        - fullName
+      properties:
+        phone:
+          type: string
+          example: "+84912345678"
+        email:
+          type: string
+          format: email
+          example: "passenger@goride.com"
+        password:
+          type: string
+          format: password
+          minLength: 6
+          example: "P@ssword123"
+        fullName:
+          type: string
+          example: "Nguyen Van A"
+        role:
+          type: string
+          enum: [PASSENGER, DRIVER]
+          default: PASSENGER
+
+    LoginRequest:
+      type: object
+      required:
+        - identifier
+        - password
+      properties:
+        identifier:
+          type: string
+          description: Phone number or email address
+          example: "+84912345678"
+        password:
+          type: string
+          format: password
+          example: "P@ssword123"
+
+    RefreshTokenRequest:
+      type: object
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+          example: "8f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c"
+
+    UserDto:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        phone:
+          type: string
+        email:
+          type: string
+        fullName:
+          type: string
+        status:
+          type: string
+          enum: [ACTIVE, LOCKED, DISABLED]
+        roles:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    AuthResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        tokenType:
+          type: string
+          example: "Bearer"
+        expiresIn:
+          type: integer
+          description: Access token lifetime in seconds
+          example: 3600
+        user:
+          $ref: '#/components/schemas/UserDto'
+
+    AuthApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/AuthResponse'
+        error:
+          type: object
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+
+    UserProfileApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/UserDto'
+        error:
+          type: object
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+
+    ErrorApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        data:
+          type: object
+          nullable: true
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: "UNAUTHORIZED"
+            message:
+              type: string
+              example: "Invalid phone/email or password"
+            details:
+              type: array
+              items:
+                type: string
+        timestamp:
+          type: string
+          format: date-time
+
