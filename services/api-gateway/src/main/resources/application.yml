@@ -4,9 +4,64 @@ server:
 spring:
   application:
     name: api-gateway
+  main:
+    web-application-type: reactive
   cloud:
     gateway:
-      routes: []
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins: "*"
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - PATCH
+              - OPTIONS
+            allowedHeaders: "*"
+            exposedHeaders:
+              - "X-Correlation-Id"
+              - "Authorization"
+      routes:
+        # 1. User & Authentication Service
+        - id: user-service
+          uri: ${USER_SERVICE_URI:http://localhost:8081}
+          predicates:
+            - Path=/api/v1/auth/**, /api/v1/users/**
+
+        # 2. Driver Service
+        - id: driver-service
+          uri: ${DRIVER_SERVICE_URI:http://localhost:8082}
+          predicates:
+            - Path=/api/v1/drivers/**
+
+        # 3. Trip Service
+        - id: trip-service
+          uri: ${TRIP_SERVICE_URI:http://localhost:8083}
+          predicates:
+            - Path=/api/v1/trips/**
+
+        # 4. Matching Service
+        - id: matching-service
+          uri: ${MATCHING_SERVICE_URI:http://localhost:8084}
+          predicates:
+            - Path=/api/v1/matching/**
+
+        # 5. Payment Service
+        - id: payment-service
+          uri: ${PAYMENT_SERVICE_URI:http://localhost:8085}
+          predicates:
+            - Path=/api/v1/payments/**
+
+        # 6. Notification Service
+        - id: notification-service
+          uri: ${NOTIFICATION_SERVICE_URI:http://localhost:8086}
+          predicates:
+            - Path=/api/v1/notifications/**
+
+jwt:
+  secret: ${JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
 
 management:
   endpoints:
