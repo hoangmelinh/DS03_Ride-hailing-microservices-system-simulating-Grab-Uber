@@ -1,0 +1,517 @@
+openapi: 3.0.3
+info:
+  title: GoRide - Trip Service API
+  description: REST API contract for trip lifecycle, passenger requests, fare estimation, and trip detail retrieval in GoRide Distributed System.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8083
+    description: Local Trip Service Direct Port
+  - url: http://localhost:8080/trip-service
+    description: Via API Gateway
+
+paths:
+  /api/v1/trips:
+    post:
+      summary: Request a new trip ride
+      description: |
+        Creates a new ride request in REQUESTED status.
+        Saves the initial status history and queues a Transactional Outbox event `trip.created`
+        for matching and driver assignment in the same database transaction.
+      operationId: createTrip
+      parameters:
+        - name: X-Correlation-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Distributed tracing correlation ID
+        - name: X-User-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Authenticated user ID (passenger) passed from API Gateway
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTripRequest'
+      responses:
+        '201':
+          description: Trip successfully created and queued for matching
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TripApiResponse'
+        '400':
+          description: Invalid request payload or missing required coordinates
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+
+  /api/v1/trips/{id}:
+    get:
+      summary: Get trip summary by ID
+      description: Retrieves basic trip summary and current status.
+      operationId: getTripById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Trip unique identifier
+        - name: X-Correlation-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Trip details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TripApiResponse'
+        '404':
+          description: Trip not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+
+  /api/v1/trips/{id}/detail:
+    get:
+      summary: Get detailed trip with full status history
+      description: Retrieves trip summary along with the complete audit trail of status transitions.
+      operationId: getTripDetail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Trip unique identifier
+        - name: X-Correlation-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Trip detail with status history retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TripDetailApiResponse'
+        '404':
+          description: Trip not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+
+  /api/v1/trips/passenger/{passengerId}:
+    get:
+      summary: Query trips requested by a passenger
+      description: Returns a paginated list of trips for a passenger ordered by requested time descending.
+      operationId: getTripsByPassenger
+      parameters:
+        - name: passengerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Passenger unique identifier
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+        - name: sort
+          in: query
+          required: false
+          schema:
+            type: string
+            default: requestedAt,desc
+      responses:
+        '200':
+          description: Paginated trip list retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PageTripApiResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+
+  /api/v1/trips/estimate-fare:
+    post:
+      summary: Estimate distance and ride fare
+      description: Calculates Haversine distance in km and estimates ride fare without creating a trip record.
+      operationId: estimateFare
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EstimateFareRequest'
+      responses:
+        '200':
+          description: Fare estimation calculated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FareEstimateApiResponse'
+        '400':
+          description: Invalid coordinate parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+
+components:
+  schemas:
+    CreateTripRequest:
+      type: object
+      required:
+        - pickupLatitude
+        - pickupLongitude
+        - destinationLatitude
+        - destinationLongitude
+      properties:
+        passengerId:
+          type: string
+          format: uuid
+          description: Passenger ID (optional if X-User-Id header is supplied by Gateway)
+        pickupLatitude:
+          type: number
+          format: double
+          minimum: -90.0
+          maximum: 90.0
+          example: 10.776889
+        pickupLongitude:
+          type: number
+          format: double
+          minimum: -180.0
+          maximum: 180.0
+          example: 106.700806
+        pickupAddress:
+          type: string
+          maxLength: 255
+          example: "Bitexco Financial Tower, District 1, HCMC"
+        destinationLatitude:
+          type: number
+          format: double
+          minimum: -90.0
+          maximum: 90.0
+          example: 10.823099
+        destinationLongitude:
+          type: number
+          format: double
+          minimum: -180.0
+          maximum: 180.0
+          example: 106.629664
+        destinationAddress:
+          type: string
+          maxLength: 255
+          example: "Tan Son Nhat International Airport, Tan Binh, HCMC"
+        estimatedFare:
+          type: number
+          description: Optional pre-estimated fare. If omitted, trip-service calculates automatically.
+          example: 95000.00
+        currency:
+          type: string
+          default: VND
+          example: "VND"
+
+    EstimateFareRequest:
+      type: object
+      required:
+        - pickupLatitude
+        - pickupLongitude
+        - destinationLatitude
+        - destinationLongitude
+      properties:
+        pickupLatitude:
+          type: number
+          format: double
+          minimum: -90.0
+          maximum: 90.0
+          example: 10.776889
+        pickupLongitude:
+          type: number
+          format: double
+          minimum: -180.0
+          maximum: 180.0
+          example: 106.700806
+        destinationLatitude:
+          type: number
+          format: double
+          minimum: -90.0
+          maximum: 90.0
+          example: 10.823099
+        destinationLongitude:
+          type: number
+          format: double
+          minimum: -180.0
+          maximum: 180.0
+          example: 106.629664
+
+    TripResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        passengerId:
+          type: string
+          format: uuid
+        driverId:
+          type: string
+          format: uuid
+          nullable: true
+        pickupLatitude:
+          type: number
+        pickupLongitude:
+          type: number
+        pickupAddress:
+          type: string
+        destinationLatitude:
+          type: number
+        destinationLongitude:
+          type: number
+        destinationAddress:
+          type: string
+        status:
+          type: string
+          enum: [REQUESTED, MATCHING, DRIVER_ASSIGNED, DRIVER_ARRIVED, IN_PROGRESS, COMPLETED, CANCELLED, NO_DRIVER_FOUND]
+          example: REQUESTED
+        estimatedFare:
+          type: number
+          example: 95000.00
+        finalFare:
+          type: number
+          nullable: true
+        currency:
+          type: string
+          example: "VND"
+        requestedAt:
+          type: string
+          format: date-time
+        assignedAt:
+          type: string
+          format: date-time
+          nullable: true
+        acceptedAt:
+          type: string
+          format: date-time
+          nullable: true
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        cancelledAt:
+          type: string
+          format: date-time
+          nullable: true
+        cancellationReason:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    TripStatusHistoryResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        tripId:
+          type: string
+          format: uuid
+        fromStatus:
+          type: string
+          nullable: true
+        toStatus:
+          type: string
+          example: REQUESTED
+        reason:
+          type: string
+        actorType:
+          type: string
+          enum: [USER, DRIVER, SYSTEM, ADMIN]
+          example: USER
+        actorId:
+          type: string
+          format: uuid
+          nullable: true
+        correlationId:
+          type: string
+          format: uuid
+        changedAt:
+          type: string
+          format: date-time
+
+    TripDetailResponse:
+      type: object
+      properties:
+        trip:
+          $ref: '#/components/schemas/TripResponse'
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/TripStatusHistoryResponse'
+
+    FareEstimateResponse:
+      type: object
+      properties:
+        distanceKm:
+          type: number
+          example: 8.52
+        estimatedFare:
+          type: number
+          example: 80200.00
+        currency:
+          type: string
+          example: "VND"
+        baseFare:
+          type: number
+          example: 15000.00
+        ratePerKm:
+          type: number
+          example: 10000.00
+
+    TripApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/TripResponse'
+        timestamp:
+          type: string
+          format: date-time
+
+    TripDetailApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/TripDetailResponse'
+        timestamp:
+          type: string
+          format: date-time
+
+    FareEstimateApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/FareEstimateResponse'
+        timestamp:
+          type: string
+          format: date-time
+
+    PageTripApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            content:
+              type: array
+              items:
+                $ref: '#/components/schemas/TripResponse'
+            totalElements:
+              type: integer
+            totalPages:
+              type: integer
+            size:
+              type: integer
+            number:
+              type: integer
+        timestamp:
+          type: string
+          format: date-time
+
+    ErrorApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: NOT_FOUND
+            message:
+              type: string
+              example: "Trip not found with id: d8e5e8e0-1234-4a2b-9876-123456789abc"
+            details:
+              type: object
+        timestamp:
+          type: string
+          format: date-time
+
