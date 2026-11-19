@@ -117,18 +117,22 @@ components:
           example: "8fa34e71-7968-49b6-9e73-ade99fe667cd"
         title:
           type: string
+          maxLength: 255
           description: Title of the notification
           example: "Tài xế đang đến"
         content:
           type: string
+          maxLength: 1000
           description: Message content of the notification
           example: "Tài xế Nguyễn Văn A với xe 29A-12345 đang đến đón bạn."
         type:
           type: string
+          maxLength: 50
           description: Notification type code
           example: "DRIVER_ARRIVING"
         recipientRole:
           type: string
+          maxLength: 30
           description: Target role of the recipient (PASSENGER, DRIVER)
           example: "PASSENGER"
         tripId:

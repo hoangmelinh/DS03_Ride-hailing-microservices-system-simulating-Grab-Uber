@@ -8,10 +8,14 @@ import com.goride.common.handler.BaseGlobalExceptionHandler;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class CommonModuleTest {
 
@@ -79,5 +83,21 @@ class CommonModuleTest {
         assertNotNull(response.getBody());
         assertFalse(response.getBody().isSuccess());
         assertEquals("DUPLICATE_RESOURCE", response.getBody().getError().getCode());
+    }
+
+    @Test
+    void testExceptionHandler_MethodArgumentTypeMismatch() {
+        MethodArgumentTypeMismatchException ex = mock(MethodArgumentTypeMismatchException.class);
+        when(ex.getName()).thenReturn("tripId");
+        doReturn(UUID.class).when(ex).getRequiredType();
+
+        ResponseEntity<ApiResponse<Void>> response = exceptionHandler.handleMethodArgumentTypeMismatch(ex);
+
+        assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertFalse(response.getBody().isSuccess());
+        assertEquals("INVALID_PARAMETER", response.getBody().getError().getCode());
+        assertTrue(response.getBody().getError().getMessage().contains("tripId"));
+        assertTrue(response.getBody().getError().getMessage().contains("UUID"));
     }
 }

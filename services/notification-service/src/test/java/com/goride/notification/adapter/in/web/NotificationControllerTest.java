@@ -97,6 +97,45 @@ class NotificationControllerTest {
     }
 
     @Test
+    @DisplayName("POST /api/v1/notifications/send with type exceeding VARCHAR(50) returns 400 Bad Request (AUD-P1-002)")
+    void sendNotification_TypeTooLong_Returns400() throws Exception {
+        SendNotificationRequest request = new SendNotificationRequest(
+                UUID.randomUUID(),
+                "Valid Title",
+                "Valid Content",
+                "T".repeat(51) // Exceeds 50 characters
+        );
+
+        mockMvc.perform(post("/api/v1/notifications/send")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/notifications/send with recipientRole exceeding VARCHAR(30) returns 400 Bad Request (AUD-P1-002)")
+    void sendNotification_RecipientRoleTooLong_Returns400() throws Exception {
+        SendNotificationRequest request = new SendNotificationRequest(
+                UUID.randomUUID(),
+                "Valid Title",
+                "Valid Content",
+                "DRIVER_ARRIVING",
+                "R".repeat(31), // Exceeds 30 characters
+                UUID.randomUUID(),
+                null
+        );
+
+        mockMvc.perform(post("/api/v1/notifications/send")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
     @DisplayName("GET /api/v1/notifications/{userId} with default pagination parameters returns 200 and page=0, size=20")
     void getNotificationsByUserId_DefaultPagination_Returns200WithList() throws Exception {
         UUID userId = UUID.randomUUID();
@@ -196,6 +235,16 @@ class NotificationControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/notifications/{userId} with invalid UUID returns 400 with INVALID_PARAMETER")
+    void getNotificationsByUserId_InvalidUuid_Returns400() throws Exception {
+        mockMvc.perform(get("/api/v1/notifications/{userId}", "not-a-valid-uuid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("INVALID_PARAMETER"))
+                .andExpect(jsonPath("$.error.message").value("Failed to convert parameter 'userId' to required type 'UUID'"));
     }
 }
 

@@ -15,6 +15,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -78,12 +80,31 @@ public class NotificationServiceImpl implements NotificationService {
         entity.setStatus(NotificationStatus.SENT);
         entity.setPayload(payloadJson);
         entity.setAttemptCount(1);
+        // Explicitly maintain invariant: sentAt >= createdAt
+        entity.setCreatedAt(now);
+        entity.setUpdatedAt(now);
         entity.setSentAt(now);
 
         NotificationEntity saved = notificationRepository.save(entity);
 
-        log.info("Notification sent successfully: id={}, userId={}, type={}, channel={}",
-                saved.getId(), saved.getRecipientUserId(), saved.getType(), saved.getChannel());
+        // Register commit-confirmed success log only when both an actual transaction and synchronization are active
+        final UUID notificationId = saved.getId();
+        final UUID recipientUserId = saved.getRecipientUserId();
+        final String notificationType = saved.getType();
+        final NotificationChannel notificationChannel = saved.getChannel();
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    log.info("Notification sent successfully: id={}, userId={}, type={}, channel={}",
+                            notificationId, recipientUserId, notificationType, notificationChannel);
+                }
+            });
+        } else {
+            log.debug("Skipped commit-confirmed notification success log because active transaction synchronization is unavailable: id={}, userId={}",
+                    notificationId, recipientUserId);
+        }
 
         return NotificationResponse.from(saved, objectMapper);
     }
