@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: GoRide - Trip Service API
-  description: REST API contract for trip lifecycle, passenger requests, fare estimation, and trip detail retrieval in GoRide Distributed System.
+  description: REST API contract for trip lifecycle, passenger requests, driver assignment, fare estimation, and trip completion in GoRide Distributed System.
   version: 1.0.0
 servers:
   - url: http://localhost:8083
@@ -25,14 +25,12 @@ paths:
           schema:
             type: string
             format: uuid
-          description: Distributed tracing correlation ID
         - name: X-User-Id
           in: header
           required: false
           schema:
             type: string
             format: uuid
-          description: Authenticated user ID (passenger) passed from API Gateway
       requestBody:
         required: true
         content:
@@ -47,7 +45,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/TripApiResponse'
         '400':
-          description: Invalid request payload or missing required coordinates
+          description: Invalid request payload
           content:
             application/json:
               schema:
@@ -62,19 +60,11 @@ paths:
   /api/v1/trips/{id}:
     get:
       summary: Get trip summary by ID
-      description: Retrieves basic trip summary and current status.
       operationId: getTripById
       parameters:
         - name: id
           in: path
           required: true
-          schema:
-            type: string
-            format: uuid
-          description: Trip unique identifier
-        - name: X-Correlation-Id
-          in: header
-          required: false
           schema:
             type: string
             format: uuid
@@ -91,29 +81,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorApiResponse'
-        '500':
-          description: Internal server error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorApiResponse'
 
   /api/v1/trips/{id}/detail:
     get:
       summary: Get detailed trip with full status history
-      description: Retrieves trip summary along with the complete audit trail of status transitions.
       operationId: getTripDetail
       parameters:
         - name: id
           in: path
           required: true
-          schema:
-            type: string
-            format: uuid
-          description: Trip unique identifier
-        - name: X-Correlation-Id
-          in: header
-          required: false
           schema:
             type: string
             format: uuid
@@ -130,17 +106,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorApiResponse'
-        '500':
-          description: Internal server error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorApiResponse'
 
   /api/v1/trips/passenger/{passengerId}:
     get:
       summary: Query trips requested by a passenger
-      description: Returns a paginated list of trips for a passenger ordered by requested time descending.
       operationId: getTripsByPassenger
       parameters:
         - name: passengerId
@@ -149,7 +118,6 @@ paths:
           schema:
             type: string
             format: uuid
-          description: Passenger unique identifier
         - name: page
           in: query
           required: false
@@ -162,12 +130,6 @@ paths:
           schema:
             type: integer
             default: 20
-        - name: sort
-          in: query
-          required: false
-          schema:
-            type: string
-            default: requestedAt,desc
       responses:
         '200':
           description: Paginated trip list retrieved successfully
@@ -175,17 +137,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PageTripApiResponse'
-        '500':
-          description: Internal server error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorApiResponse'
 
   /api/v1/trips/estimate-fare:
     post:
       summary: Estimate distance and ride fare
-      description: Calculates Haversine distance in km and estimates ride fare without creating a trip record.
       operationId: estimateFare
       requestBody:
         required: true
@@ -200,18 +155,230 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FareEstimateApiResponse'
+
+  /api/v1/trips/{id}/assign:
+    patch:
+      summary: Assign driver to trip (Matching Saga)
+      description: |
+        Called by Matching Service Saga after driver reservation succeeds.
+        Supports Idempotency-Key header. Sets status to DRIVER_ASSIGNED and queues outbox event `trip.driver-assigned`.
+      operationId: assignDriver
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: X-Correlation-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignDriverRequest'
+      responses:
+        '200':
+          description: Driver successfully assigned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TripApiResponse'
         '400':
-          description: Invalid coordinate parameters
+          description: Invalid trip state or driver ID
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorApiResponse'
-        '500':
-          description: Internal server error
+        '404':
+          description: Trip not found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorApiResponse'
+
+  /internal/trips/{id}/assign-driver:
+    post:
+      summary: Assign driver via internal REST endpoint
+      description: Internal endpoint matching architecture.md specification. Identical semantics to PATCH /api/v1/trips/{id}/assign.
+      operationId: assignDriverInternal
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+        - name: X-Correlation-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssignDriverRequest'
+      responses:
+        '200':
+          description: Driver successfully assigned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TripApiResponse'
+
+  /api/v1/trips/{id}/accept:
+    patch:
+      summary: Driver accepts trip
+      description: Transitions status from DRIVER_ASSIGNED to ACCEPTED. Queues outbox event `trip.accepted`.
+      operationId: acceptTrip
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-User-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: X-Correlation-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Trip accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TripApiResponse'
+
+  /api/v1/trips/{id}/start:
+    patch:
+      summary: Driver starts trip
+      description: Transitions status to IN_PROGRESS and updates startedAt. Queues outbox event `trip.started`.
+      operationId: startTrip
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-User-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: X-Correlation-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Trip started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TripApiResponse'
+
+  /api/v1/trips/{id}/complete:
+    patch:
+      summary: Driver completes trip
+      description: |
+        Transitions status to COMPLETED and sets finalFare and completedAt.
+        Queues outbox event `trip.completed` which triggers Payment Service and Notification Service.
+      operationId: completeTrip
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-User-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: X-Correlation-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Trip completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TripApiResponse'
+
+  /api/v1/trips/{id}/cancel:
+    patch:
+      summary: Cancel trip
+      description: Transitions status to CANCELLED. Queues outbox event `trip.cancelled`.
+      operationId: cancelTrip
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: X-User-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: X-Correlation-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelTripRequest'
+      responses:
+        '200':
+          description: Trip cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TripApiResponse'
 
 components:
   schemas:
@@ -226,47 +393,27 @@ components:
         passengerId:
           type: string
           format: uuid
-          description: Passenger ID (optional if X-User-Id header is supplied by Gateway)
         pickupLatitude:
           type: number
           format: double
-          minimum: -90.0
-          maximum: 90.0
-          example: 10.776889
         pickupLongitude:
           type: number
           format: double
-          minimum: -180.0
-          maximum: 180.0
-          example: 106.700806
         pickupAddress:
           type: string
-          maxLength: 255
-          example: "Bitexco Financial Tower, District 1, HCMC"
         destinationLatitude:
           type: number
           format: double
-          minimum: -90.0
-          maximum: 90.0
-          example: 10.823099
         destinationLongitude:
           type: number
           format: double
-          minimum: -180.0
-          maximum: 180.0
-          example: 106.629664
         destinationAddress:
           type: string
-          maxLength: 255
-          example: "Tan Son Nhat International Airport, Tan Binh, HCMC"
         estimatedFare:
           type: number
-          description: Optional pre-estimated fare. If omitted, trip-service calculates automatically.
-          example: 95000.00
         currency:
           type: string
           default: VND
-          example: "VND"
 
     EstimateFareRequest:
       type: object
@@ -279,27 +426,30 @@ components:
         pickupLatitude:
           type: number
           format: double
-          minimum: -90.0
-          maximum: 90.0
-          example: 10.776889
         pickupLongitude:
           type: number
           format: double
-          minimum: -180.0
-          maximum: 180.0
-          example: 106.700806
         destinationLatitude:
           type: number
           format: double
-          minimum: -90.0
-          maximum: 90.0
-          example: 10.823099
         destinationLongitude:
           type: number
           format: double
-          minimum: -180.0
-          maximum: 180.0
-          example: 106.629664
+
+    AssignDriverRequest:
+      type: object
+      required:
+        - driverId
+      properties:
+        driverId:
+          type: string
+          format: uuid
+
+    CancelTripRequest:
+      type: object
+      properties:
+        reason:
+          type: string
 
     TripResponse:
       type: object
@@ -328,17 +478,14 @@ components:
           type: string
         status:
           type: string
-          enum: [REQUESTED, MATCHING, DRIVER_ASSIGNED, DRIVER_ARRIVED, IN_PROGRESS, COMPLETED, CANCELLED, NO_DRIVER_FOUND]
-          example: REQUESTED
+          enum: [REQUESTED, MATCHING, DRIVER_ASSIGNED, ACCEPTED, IN_PROGRESS, COMPLETED, PAYMENT_PENDING, PAID, PAYMENT_FAILED, CANCELLED]
         estimatedFare:
           type: number
-          example: 95000.00
         finalFare:
           type: number
           nullable: true
         currency:
           type: string
-          example: "VND"
         requestedAt:
           type: string
           format: date-time
@@ -365,12 +512,6 @@ components:
         cancellationReason:
           type: string
           nullable: true
-        createdAt:
-          type: string
-          format: date-time
-        updatedAt:
-          type: string
-          format: date-time
 
     TripStatusHistoryResponse:
       type: object
@@ -386,13 +527,11 @@ components:
           nullable: true
         toStatus:
           type: string
-          example: REQUESTED
         reason:
           type: string
         actorType:
           type: string
           enum: [USER, DRIVER, SYSTEM, ADMIN]
-          example: USER
         actorId:
           type: string
           format: uuid
@@ -419,26 +558,20 @@ components:
       properties:
         distanceKm:
           type: number
-          example: 8.52
         estimatedFare:
           type: number
-          example: 80200.00
         currency:
           type: string
-          example: "VND"
         baseFare:
           type: number
-          example: 15000.00
         ratePerKm:
           type: number
-          example: 10000.00
 
     TripApiResponse:
       type: object
       properties:
         success:
           type: boolean
-          example: true
         data:
           $ref: '#/components/schemas/TripResponse'
         timestamp:
@@ -450,7 +583,6 @@ components:
       properties:
         success:
           type: boolean
-          example: true
         data:
           $ref: '#/components/schemas/TripDetailResponse'
         timestamp:
@@ -462,7 +594,6 @@ components:
       properties:
         success:
           type: boolean
-          example: true
         data:
           $ref: '#/components/schemas/FareEstimateResponse'
         timestamp:
@@ -474,7 +605,6 @@ components:
       properties:
         success:
           type: boolean
-          example: true
         data:
           type: object
           properties:
@@ -486,10 +616,6 @@ components:
               type: integer
             totalPages:
               type: integer
-            size:
-              type: integer
-            number:
-              type: integer
         timestamp:
           type: string
           format: date-time
@@ -499,19 +625,13 @@ components:
       properties:
         success:
           type: boolean
-          example: false
         error:
           type: object
           properties:
             code:
               type: string
-              example: NOT_FOUND
             message:
               type: string
-              example: "Trip not found with id: d8e5e8e0-1234-4a2b-9876-123456789abc"
-            details:
-              type: object
         timestamp:
           type: string
           format: date-time
-

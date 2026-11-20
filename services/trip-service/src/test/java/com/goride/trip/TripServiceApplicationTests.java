@@ -7,6 +7,7 @@ import com.goride.trip.infrastructure.persistence.repository.TripDeadLetterRepos
 import com.goride.trip.infrastructure.persistence.repository.TripRepository;
 import com.goride.trip.infrastructure.persistence.repository.TripStatusHistoryRepository;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 
@@ -30,6 +31,9 @@ class TripServiceApplicationTests {
 
     @MockBean
     private TripDeadLetterRepository tripDeadLetterRepository;
+
+    @MockBean
+    private RabbitTemplate rabbitTemplate;
 
     @Test
     void contextLoads() {
