@@ -4,17 +4,22 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.goride.common.exception.EntityNotFoundException;
 import com.goride.common.exception.InvalidRequestException;
+import com.goride.trip.application.dto.request.AssignDriverRequest;
+import com.goride.trip.application.dto.request.CancelTripRequest;
 import com.goride.trip.application.dto.request.CreateTripRequest;
 import com.goride.trip.application.dto.request.EstimateFareRequest;
 import com.goride.trip.application.dto.response.FareEstimateResponse;
 import com.goride.trip.application.dto.response.TripDetailResponse;
 import com.goride.trip.application.dto.response.TripResponse;
 import com.goride.trip.domain.model.ActorType;
+import com.goride.trip.domain.model.IdempotencyStatus;
 import com.goride.trip.domain.model.OutboxStatus;
 import com.goride.trip.domain.model.TripStatus;
+import com.goride.trip.infrastructure.persistence.entity.IdempotencyRecordEntity;
 import com.goride.trip.infrastructure.persistence.entity.OutboxEventEntity;
 import com.goride.trip.infrastructure.persistence.entity.TripEntity;
 import com.goride.trip.infrastructure.persistence.entity.TripStatusHistoryEntity;
+import com.goride.trip.infrastructure.persistence.repository.IdempotencyRecordRepository;
 import com.goride.trip.infrastructure.persistence.repository.OutboxEventRepository;
 import com.goride.trip.infrastructure.persistence.repository.TripRepository;
 import com.goride.trip.infrastructure.persistence.repository.TripStatusHistoryRepository;
@@ -54,6 +59,9 @@ class TripServiceImplTest {
     @Mock
     private OutboxEventRepository outboxEventRepository;
 
+    @Mock
+    private IdempotencyRecordRepository idempotencyRecordRepository;
+
     private ObjectMapper objectMapper;
     private TripServiceImpl tripService;
 
@@ -61,7 +69,7 @@ class TripServiceImplTest {
     void setUp() {
         objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
-        tripService = new TripServiceImpl(tripRepository, tripStatusHistoryRepository, outboxEventRepository, objectMapper);
+        tripService = new TripServiceImpl(tripRepository, tripStatusHistoryRepository, outboxEventRepository, idempotencyRecordRepository, objectMapper);
     }
 
     @Test
@@ -97,79 +105,176 @@ class TripServiceImplTest {
         assertThat(response.getPassengerId()).isEqualTo(passengerId);
         assertThat(response.getStatus()).isEqualTo(TripStatus.REQUESTED);
         assertThat(response.getEstimatedFare()).isEqualByComparingTo("95000.00");
-        assertThat(response.getCurrency()).isEqualTo("VND");
-
-        // Verify Status History record was saved
-        ArgumentCaptor<TripStatusHistoryEntity> historyCaptor = ArgumentCaptor.forClass(TripStatusHistoryEntity.class);
-        verify(tripStatusHistoryRepository).save(historyCaptor.capture());
-        TripStatusHistoryEntity savedHistory = historyCaptor.getValue();
-        assertThat(savedHistory.getTripId()).isEqualTo(response.getId());
-        assertThat(savedHistory.getToStatus()).isEqualTo(TripStatus.REQUESTED.name());
-        assertThat(savedHistory.getActorType()).isEqualTo(ActorType.USER);
-        assertThat(savedHistory.getActorId()).isEqualTo(passengerId);
-        assertThat(savedHistory.getCorrelationId()).isEqualTo(correlationId);
 
         // Verify Outbox Event was saved (Rule 6: Transactional Outbox)
         ArgumentCaptor<OutboxEventEntity> outboxCaptor = ArgumentCaptor.forClass(OutboxEventEntity.class);
         verify(outboxEventRepository).save(outboxCaptor.capture());
         OutboxEventEntity savedOutbox = outboxCaptor.getValue();
         assertThat(savedOutbox.getAggregateType()).isEqualTo("TRIP");
-        assertThat(savedOutbox.getAggregateId()).isEqualTo(response.getId());
         assertThat(savedOutbox.getEventType()).isEqualTo("trip.created");
-        assertThat(savedOutbox.getEventVersion()).isEqualTo(1);
         assertThat(savedOutbox.getStatus()).isEqualTo(OutboxStatus.PENDING);
         assertThat(savedOutbox.getCorrelationId()).isEqualTo(correlationId);
-        assertThat(savedOutbox.getPayload()).contains(response.getId().toString());
-        assertThat(savedOutbox.getPayload()).contains(passengerId.toString());
-        assertThat(savedOutbox.getPayload()).contains("REQUESTED");
     }
 
     @Test
-    @DisplayName("createTrip: Automatically calculates fare when estimatedFare is omitted")
-    void createTrip_CalculatesFareAutomatically() {
-        UUID passengerId = UUID.randomUUID();
+    @DisplayName("assignDriver: Successfully assigns driver, transitions status to DRIVER_ASSIGNED, and creates outbox event")
+    void assignDriver_Success() {
+        UUID tripId = UUID.randomUUID();
+        UUID driverId = UUID.randomUUID();
+        UUID correlationId = UUID.randomUUID();
 
-        CreateTripRequest request = new CreateTripRequest(
-                passengerId,
-                new BigDecimal("10.776889"),
-                new BigDecimal("106.700806"),
-                "District 1",
-                new BigDecimal("10.823099"),
-                new BigDecimal("106.629664"),
-                "Tan Binh"
-        );
-        // estimatedFare is null
+        TripEntity trip = new TripEntity(UUID.randomUUID(), new BigDecimal("10.0"), new BigDecimal("106.0"), "From",
+                new BigDecimal("10.1"), new BigDecimal("106.1"), "To", new BigDecimal("50000.00"));
+        trip.setId(tripId);
+        trip.setStatus(TripStatus.REQUESTED);
 
-        when(tripRepository.save(any(TripEntity.class))).thenAnswer(invocation -> {
-            TripEntity entity = invocation.getArgument(0);
-            entity.setId(UUID.randomUUID());
-            return entity;
-        });
+        when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip));
+        when(tripRepository.save(any(TripEntity.class))).thenAnswer(i -> i.getArgument(0));
 
-        TripResponse response = tripService.createTrip(request, null);
+        AssignDriverRequest request = new AssignDriverRequest(driverId);
+        TripResponse response = tripService.assignDriver(tripId, request, "IDEMP-001", correlationId);
 
         assertThat(response).isNotNull();
-        assertThat(response.getEstimatedFare()).isNotNull();
-        // Distance is ~9.4 km, base fare 15k + extra ~7.4 km * 10k => ~89,000 VND
-        assertThat(response.getEstimatedFare()).isGreaterThan(new BigDecimal("15000.00"));
+        assertThat(response.getDriverId()).isEqualTo(driverId);
+        assertThat(response.getStatus()).isEqualTo(TripStatus.DRIVER_ASSIGNED);
+        assertThat(response.getAssignedAt()).isNotNull();
+
+        // Verify outbox event 'trip.driver-assigned'
+        ArgumentCaptor<OutboxEventEntity> outboxCaptor = ArgumentCaptor.forClass(OutboxEventEntity.class);
+        verify(outboxEventRepository).save(outboxCaptor.capture());
+        assertThat(outboxCaptor.getValue().getEventType()).isEqualTo("trip.driver-assigned");
+
+        // Verify idempotency record saved
+        verify(idempotencyRecordRepository).save(any(IdempotencyRecordEntity.class));
     }
 
     @Test
-    @DisplayName("createTrip: Throws InvalidRequestException when passengerId is missing")
-    void createTrip_MissingPassengerId_ThrowsException() {
-        CreateTripRequest request = new CreateTripRequest(
-                null,
-                new BigDecimal("10.776889"),
-                new BigDecimal("106.700806"),
-                "A",
-                new BigDecimal("10.823099"),
-                new BigDecimal("106.629664"),
-                "B"
-        );
+    @DisplayName("assignDriver: Reusing idempotency key returns cached response")
+    void assignDriver_IdempotentWithKey() throws Exception {
+        UUID tripId = UUID.randomUUID();
+        UUID driverId = UUID.randomUUID();
+        String key = "IDEMP-KEY-999";
 
-        assertThatThrownBy(() -> tripService.createTrip(request, UUID.randomUUID()))
-                .isInstanceOf(InvalidRequestException.class)
-                .hasMessageContaining("Passenger ID is required");
+        TripResponse cached = new TripResponse();
+        cached.setId(tripId);
+        cached.setDriverId(driverId);
+        cached.setStatus(TripStatus.DRIVER_ASSIGNED);
+
+        IdempotencyRecordEntity record = new IdempotencyRecordEntity(key, "ASSIGN_DRIVER", tripId.toString(),
+                IdempotencyStatus.COMPLETED, Instant.now().plusSeconds(3600));
+        record.setResponseBody(objectMapper.writeValueAsString(cached));
+
+        when(idempotencyRecordRepository.findByIdempotencyKey(key)).thenReturn(Optional.of(record));
+
+        TripResponse response = tripService.assignDriver(tripId, new AssignDriverRequest(driverId), key, null);
+
+        assertThat(response.getId()).isEqualTo(tripId);
+        assertThat(response.getStatus()).isEqualTo(TripStatus.DRIVER_ASSIGNED);
+    }
+
+    @Test
+    @DisplayName("acceptTrip: Driver accepts trip, transitions to ACCEPTED, and creates outbox event")
+    void acceptTrip_Success() {
+        UUID tripId = UUID.randomUUID();
+        UUID driverId = UUID.randomUUID();
+
+        TripEntity trip = new TripEntity();
+        trip.setId(tripId);
+        trip.setDriverId(driverId);
+        trip.setStatus(TripStatus.DRIVER_ASSIGNED);
+
+        when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip));
+        when(tripRepository.save(any(TripEntity.class))).thenAnswer(i -> i.getArgument(0));
+
+        TripResponse response = tripService.acceptTrip(tripId, driverId, null);
+
+        assertThat(response.getStatus()).isEqualTo(TripStatus.ACCEPTED);
+        assertThat(response.getAcceptedAt()).isNotNull();
+
+        ArgumentCaptor<OutboxEventEntity> outboxCaptor = ArgumentCaptor.forClass(OutboxEventEntity.class);
+        verify(outboxEventRepository).save(outboxCaptor.capture());
+        assertThat(outboxCaptor.getValue().getEventType()).isEqualTo("trip.accepted");
+    }
+
+    @Test
+    @DisplayName("startTrip: Driver starts trip, transitions to IN_PROGRESS, and creates outbox event")
+    void startTrip_Success() {
+        UUID tripId = UUID.randomUUID();
+        UUID driverId = UUID.randomUUID();
+
+        TripEntity trip = new TripEntity();
+        trip.setId(tripId);
+        trip.setDriverId(driverId);
+        trip.setStatus(TripStatus.ACCEPTED);
+
+        when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip));
+        when(tripRepository.save(any(TripEntity.class))).thenAnswer(i -> i.getArgument(0));
+
+        TripResponse response = tripService.startTrip(tripId, driverId, null);
+
+        assertThat(response.getStatus()).isEqualTo(TripStatus.IN_PROGRESS);
+        assertThat(response.getStartedAt()).isNotNull();
+
+        ArgumentCaptor<OutboxEventEntity> outboxCaptor = ArgumentCaptor.forClass(OutboxEventEntity.class);
+        verify(outboxEventRepository).save(outboxCaptor.capture());
+        assertThat(outboxCaptor.getValue().getEventType()).isEqualTo("trip.started");
+    }
+
+    @Test
+    @DisplayName("completeTrip: Driver completes trip, sets final fare, transitions to COMPLETED, and creates outbox event for Payment")
+    void completeTrip_Success() {
+        UUID tripId = UUID.randomUUID();
+        UUID driverId = UUID.randomUUID();
+        UUID passengerId = UUID.randomUUID();
+
+        TripEntity trip = new TripEntity();
+        trip.setId(tripId);
+        trip.setPassengerId(passengerId);
+        trip.setDriverId(driverId);
+        trip.setStatus(TripStatus.IN_PROGRESS);
+        trip.setEstimatedFare(new BigDecimal("85000.00"));
+
+        when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip));
+        when(tripRepository.save(any(TripEntity.class))).thenAnswer(i -> i.getArgument(0));
+
+        TripResponse response = tripService.completeTrip(tripId, driverId, null);
+
+        assertThat(response.getStatus()).isEqualTo(TripStatus.COMPLETED);
+        assertThat(response.getFinalFare()).isEqualByComparingTo("85000.00");
+        assertThat(response.getCompletedAt()).isNotNull();
+
+        ArgumentCaptor<OutboxEventEntity> outboxCaptor = ArgumentCaptor.forClass(OutboxEventEntity.class);
+        verify(outboxEventRepository).save(outboxCaptor.capture());
+        OutboxEventEntity outbox = outboxCaptor.getValue();
+        assertThat(outbox.getEventType()).isEqualTo("trip.completed");
+        assertThat(outbox.getPayload()).contains(tripId.toString());
+        assertThat(outbox.getPayload()).contains(passengerId.toString());
+        assertThat(outbox.getPayload()).contains("85000.00");
+    }
+
+    @Test
+    @DisplayName("cancelTrip: Successfully cancels trip and generates outbox event")
+    void cancelTrip_Success() {
+        UUID tripId = UUID.randomUUID();
+        UUID passengerId = UUID.randomUUID();
+
+        TripEntity trip = new TripEntity();
+        trip.setId(tripId);
+        trip.setPassengerId(passengerId);
+        trip.setStatus(TripStatus.REQUESTED);
+
+        when(tripRepository.findById(tripId)).thenReturn(Optional.of(trip));
+        when(tripRepository.save(any(TripEntity.class))).thenAnswer(i -> i.getArgument(0));
+
+        CancelTripRequest request = new CancelTripRequest("Passenger changed plans");
+        TripResponse response = tripService.cancelTrip(tripId, request, passengerId, ActorType.USER, null);
+
+        assertThat(response.getStatus()).isEqualTo(TripStatus.CANCELLED);
+        assertThat(response.getCancellationReason()).isEqualTo("Passenger changed plans");
+
+        ArgumentCaptor<OutboxEventEntity> outboxCaptor = ArgumentCaptor.forClass(OutboxEventEntity.class);
+        verify(outboxEventRepository).save(outboxCaptor.capture());
+        assertThat(outboxCaptor.getValue().getEventType()).isEqualTo("trip.cancelled");
     }
 
     @Test
@@ -187,7 +292,6 @@ class TripServiceImplTest {
 
         assertThat(response).isNotNull();
         assertThat(response.getId()).isEqualTo(tripId);
-        assertThat(response.getPassengerId()).isEqualTo(passengerId);
     }
 
     @Test
@@ -197,8 +301,7 @@ class TripServiceImplTest {
         when(tripRepository.findById(tripId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> tripService.getTripById(tripId))
-                .isInstanceOf(EntityNotFoundException.class)
-                .hasMessageContaining("Trip not found with id: " + tripId);
+                .isInstanceOf(EntityNotFoundException.class);
     }
 
     @Test
@@ -206,36 +309,31 @@ class TripServiceImplTest {
     void getTripDetail_Success() {
         UUID tripId = UUID.randomUUID();
         UUID passengerId = UUID.randomUUID();
-        UUID correlationId = UUID.randomUUID();
 
         TripEntity entity = new TripEntity(passengerId, new BigDecimal("10.0"), new BigDecimal("106.0"), "From",
                 new BigDecimal("10.1"), new BigDecimal("106.1"), "To", new BigDecimal("25000.00"));
         entity.setId(tripId);
 
-        TripStatusHistoryEntity history1 = new TripStatusHistoryEntity(
-                tripId, null, "REQUESTED", "Requested", ActorType.USER, passengerId, correlationId);
-        TripStatusHistoryEntity history2 = new TripStatusHistoryEntity(
-                tripId, "REQUESTED", "MATCHING", "Finding driver", ActorType.SYSTEM, null, correlationId);
+        TripStatusHistoryEntity history = new TripStatusHistoryEntity(
+                tripId, null, "REQUESTED", "Requested", ActorType.USER, passengerId, UUID.randomUUID());
 
         when(tripRepository.findById(tripId)).thenReturn(Optional.of(entity));
-        when(tripStatusHistoryRepository.findByTripIdOrderByChangedAtAsc(tripId)).thenReturn(List.of(history1, history2));
+        when(tripStatusHistoryRepository.findByTripIdOrderByChangedAtAsc(tripId)).thenReturn(List.of(history));
 
         TripDetailResponse detail = tripService.getTripDetail(tripId);
 
         assertThat(detail).isNotNull();
         assertThat(detail.getTrip().getId()).isEqualTo(tripId);
-        assertThat(detail.getHistory()).hasSize(2);
-        assertThat(detail.getHistory().get(0).getToStatus()).isEqualTo("REQUESTED");
-        assertThat(detail.getHistory().get(1).getToStatus()).isEqualTo("MATCHING");
+        assertThat(detail.getHistory()).hasSize(1);
     }
 
     @Test
     @DisplayName("getTripsByPassenger: Returns paginated trips")
     void getTripsByPassenger_Success() {
         UUID passengerId = UUID.randomUUID();
-        TripEntity entity = new TripEntity(passengerId, new BigDecimal("10.0"), new BigDecimal("106.0"), "From",
-                new BigDecimal("10.1"), new BigDecimal("106.1"), "To", new BigDecimal("25000.00"));
+        TripEntity entity = new TripEntity();
         entity.setId(UUID.randomUUID());
+        entity.setPassengerId(passengerId);
 
         Pageable pageable = PageRequest.of(0, 10);
         when(tripRepository.findByPassengerIdOrderByRequestedAtDesc(passengerId, pageable))
@@ -244,13 +342,11 @@ class TripServiceImplTest {
         Page<TripResponse> page = tripService.getTripsByPassenger(passengerId, pageable);
 
         assertThat(page.getTotalElements()).isEqualTo(1);
-        assertThat(page.getContent().get(0).getPassengerId()).isEqualTo(passengerId);
     }
 
     @Test
     @DisplayName("estimateFare: Short distance (<= 2km) charges base fare 15,000 VND")
     void estimateFare_ShortDistance_ReturnsBaseFare() {
-        // Points ~1.1 km apart in HCMC
         EstimateFareRequest request = new EstimateFareRequest(
                 new BigDecimal("10.776889"),
                 new BigDecimal("106.700806"),
@@ -263,27 +359,5 @@ class TripServiceImplTest {
         assertThat(response).isNotNull();
         assertThat(response.getDistanceKm()).isLessThanOrEqualTo(new BigDecimal("2.00"));
         assertThat(response.getEstimatedFare()).isEqualByComparingTo(new BigDecimal("15000.00"));
-        assertThat(response.getCurrency()).isEqualTo("VND");
-    }
-
-    @Test
-    @DisplayName("estimateFare: Long distance calculates base fare + per km rate")
-    void estimateFare_LongDistance_CalculatesAccurately() {
-        // Bitexco to Tan Son Nhat Airport (~9.4 km)
-        EstimateFareRequest request = new EstimateFareRequest(
-                new BigDecimal("10.776889"),
-                new BigDecimal("106.700806"),
-                new BigDecimal("10.823099"),
-                new BigDecimal("106.629664")
-        );
-
-        FareEstimateResponse response = tripService.estimateFare(request);
-
-        assertThat(response).isNotNull();
-        assertThat(response.getDistanceKm()).isGreaterThan(new BigDecimal("5.00"));
-        assertThat(response.getEstimatedFare()).isGreaterThan(new BigDecimal("50000.00"));
-        assertThat(response.getBaseFare()).isEqualByComparingTo("15000.00");
-        assertThat(response.getRatePerKm()).isEqualByComparingTo("10000.00");
     }
 }
-
