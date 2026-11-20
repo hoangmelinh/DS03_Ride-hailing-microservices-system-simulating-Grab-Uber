@@ -106,10 +106,12 @@ components:
           type: number
           format: decimal
           minimum: 1000.00
-          description: Payment amount in VND (minimum 1,000 VND)
+          maximum: 9999999999.99
+          description: Payment amount in VND (minimum 1,000 VND, maximum 9,999,999,999.99 VND)
           example: 50000.00
         paymentMethod:
           type: string
+          maxLength: 30
           description: Payment method (e.g. MOCK_WALLET, CASH, SIMULATED_CARD)
           example: "MOCK_WALLET"
 

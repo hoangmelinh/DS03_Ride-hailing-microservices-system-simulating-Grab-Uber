@@ -13,6 +13,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.ArrayList;
@@ -49,6 +50,21 @@ public class BaseGlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
                 .body(ApiResponse.error("VALIDATION_ERROR", ex.getMessage()));
+    }
+
+    /**
+     * Handles type conversion failures on request parameters and path variables (e.g. invalid UUIDs),
+     * preventing fall-through to 500 Internal Server Error.
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMethodArgumentTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        String paramName = ex.getName();
+        String targetType = ex.getRequiredType() != null ? ex.getRequiredType().getSimpleName() : "unknown";
+        String message = String.format("Failed to convert parameter '%s' to required type '%s'", paramName, targetType);
+        log.warn("Method argument type mismatch: {}", message);
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.error("INVALID_PARAMETER", message));
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)

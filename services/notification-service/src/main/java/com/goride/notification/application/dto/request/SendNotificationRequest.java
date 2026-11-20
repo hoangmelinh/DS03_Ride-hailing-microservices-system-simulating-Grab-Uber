@@ -3,6 +3,7 @@ package com.goride.notification.application.dto.request;
 import com.goride.notification.domain.model.NotificationChannel;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 import java.util.UUID;
 
@@ -15,14 +16,18 @@ public class SendNotificationRequest {
     private UUID userId;
 
     @NotBlank(message = "title must not be blank")
+    @Size(max = 255, message = "title must not exceed 255 characters")
     private String title;
 
     @NotBlank(message = "content must not be blank")
+    @Size(max = 1000, message = "content must not exceed 1000 characters")
     private String content;
 
     @NotBlank(message = "type must not be blank")
+    @Size(max = 50, message = "type must not exceed 50 characters")
     private String type;
 
+    @Size(max = 30, message = "recipientRole must not exceed 30 characters")
     private String recipientRole;
 
     private UUID tripId;

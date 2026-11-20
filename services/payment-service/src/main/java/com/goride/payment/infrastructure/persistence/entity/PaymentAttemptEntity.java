@@ -69,6 +69,10 @@ public class PaymentAttemptEntity {
         if (this.requestedAt == null) {
             this.requestedAt = Instant.now();
         }
+        // Invariant: completedAt must not precede requestedAt
+        if (this.completedAt != null && this.completedAt.isBefore(this.requestedAt)) {
+            this.completedAt = this.requestedAt;
+        }
     }
 
     public UUID getId() {

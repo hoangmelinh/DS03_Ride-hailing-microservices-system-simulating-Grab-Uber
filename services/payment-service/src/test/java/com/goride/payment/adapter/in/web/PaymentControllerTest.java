@@ -113,6 +113,42 @@ class PaymentControllerTest {
     }
 
     @Test
+    @DisplayName("POST /api/v1/payments/process with amount exceeding NUMERIC(12,2) limit returns 400 Bad Request (AUD-P1-002)")
+    void processPayment_AmountExceedsMax_Returns400() throws Exception {
+        ProcessPaymentRequest invalidRequest = new ProcessPaymentRequest(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                new BigDecimal("10000000000.00"), // Exceeds 9,999,999,999.99
+                "MOCK_WALLET"
+        );
+
+        mockMvc.perform(post("/api/v1/payments/process")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(invalidRequest)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/payments/process with paymentMethod exceeding VARCHAR(30) returns 400 Bad Request (AUD-P1-002)")
+    void processPayment_PaymentMethodTooLong_Returns400() throws Exception {
+        ProcessPaymentRequest invalidRequest = new ProcessPaymentRequest(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                new BigDecimal("50000.00"),
+                "A".repeat(31) // Exceeds 30 characters
+        );
+
+        mockMvc.perform(post("/api/v1/payments/process")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(invalidRequest)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
     @DisplayName("GET /api/v1/payments/{tripId} returns 200 when payment exists")
     void getPaymentByTripId_Found_Returns200() throws Exception {
         UUID tripId = UUID.randomUUID();
@@ -154,6 +190,15 @@ class PaymentControllerTest {
                 .andExpect(jsonPath("$.success").value(false))
                 .andExpect(jsonPath("$.error.code").value("NOT_FOUND"))
                 .andExpect(jsonPath("$.error.message").value("Payment not found for trip: " + tripId));
+    }
+
+    @Test
+    @DisplayName("GET /api/v1/payments/{tripId} with invalid UUID returns 400 Bad Request (AUD-P1-001)")
+    void getPaymentByTripId_InvalidUuid_Returns400() throws Exception {
+        mockMvc.perform(get("/api/v1/payments/{tripId}", "not-a-valid-uuid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.success").value(false))
+                .andExpect(jsonPath("$.error.code").value("INVALID_PARAMETER"));
     }
 
     @Test

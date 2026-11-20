@@ -14,7 +14,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
@@ -65,6 +68,9 @@ public class PaymentServiceImpl implements PaymentService {
         payment.setStatus(PaymentStatus.SUCCEEDED);
         payment.setProvider(request.getPaymentMethod() != null ? request.getPaymentMethod().trim().toUpperCase() : "SIMULATED");
         payment.setProviderReference("SIM-PAY-" + UUID.randomUUID());
+        // Explicitly maintain invariant: completedAt >= createdAt
+        payment.setCreatedAt(now);
+        payment.setUpdatedAt(now);
         payment.setCompletedAt(now);
 
         // Save new PaymentEntity. If a concurrent race condition occurs on unique constraint uq_payments_trip_id,
@@ -77,11 +83,28 @@ public class PaymentServiceImpl implements PaymentService {
         attempt.setPayment(savedPayment);
         attempt.setAttemptNo(1);
         attempt.setStatus(PaymentAttemptStatus.SUCCESS);
+        attempt.setRequestedAt(now);
         attempt.setCompletedAt(now);
         paymentAttemptRepository.save(attempt);
 
-        log.info("Payment completed successfully: paymentId={}, tripId={}, amount={} VND, providerRef={}",
-                savedPayment.getId(), savedPayment.getTripId(), savedPayment.getAmount(), savedPayment.getProviderReference());
+        // Register commit-confirmed success log only when both an actual transaction and synchronization are active
+        final UUID paymentId = savedPayment.getId();
+        final UUID savedTripId = savedPayment.getTripId();
+        final BigDecimal savedAmount = savedPayment.getAmount();
+        final String providerRef = savedPayment.getProviderReference();
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    log.info("Payment completed successfully: paymentId={}, tripId={}, amount={} VND, providerRef={}",
+                            paymentId, savedTripId, savedAmount, providerRef);
+                }
+            });
+        } else {
+            log.debug("Skipped commit-confirmed payment success log because active transaction synchronization is unavailable: paymentId={}, tripId={}",
+                    paymentId, savedTripId);
+        }
 
         return PaymentResponse.from(savedPayment);
     }

@@ -1,5 +1,8 @@
 package com.goride.notification.application.service;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.goride.notification.application.dto.request.SendNotificationRequest;
 import com.goride.notification.application.dto.response.NotificationResponse;
@@ -8,6 +11,7 @@ import com.goride.notification.domain.model.NotificationChannel;
 import com.goride.notification.domain.model.NotificationStatus;
 import com.goride.notification.infrastructure.persistence.entity.NotificationEntity;
 import com.goride.notification.infrastructure.persistence.repository.NotificationRepository;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -15,10 +19,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Instant;
 import java.util.List;
@@ -62,7 +69,9 @@ class NotificationServiceImplTest {
                 .thenAnswer(invocation -> {
                     NotificationEntity entity = invocation.getArgument(0);
                     entity.setId(UUID.randomUUID());
-                    entity.setCreatedAt(Instant.now());
+                    if (entity.getCreatedAt() == null) {
+                        entity.setCreatedAt(Instant.now());
+                    }
                     return entity;
                 });
 
@@ -80,6 +89,9 @@ class NotificationServiceImplTest {
         NotificationEntity savedEntity = captor.getValue();
 
         assertThat(savedEntity.getSourceEventId()).isNotNull();
+        assertThat(savedEntity.getCreatedAt()).isNotNull();
+        assertThat(savedEntity.getSentAt()).isNotNull();
+        assertThat(savedEntity.getSentAt()).isAfterOrEqualTo(savedEntity.getCreatedAt());
         assertThat(savedEntity.getPayload()).contains("\"title\":\"Chuyến đi đã bắt đầu\"");
         assertThat(savedEntity.getPayload()).contains("\"content\":\"Tài xế đã bắt đầu hành trình đến điểm đến\"");
         assertThat(savedEntity.getAttemptCount()).isEqualTo(1);
@@ -136,6 +148,148 @@ class NotificationServiceImplTest {
         assertThat(resultPage).isNotNull();
         assertThat(resultPage.getTotalElements()).isEqualTo(1);
         assertThat(resultPage.getContent().get(0).getTitle()).isEqualTo("Hoàn thành");
+    }
+
+    @AfterEach
+    void tearDownTransactionState() {
+        TransactionSynchronizationManager.clear();
+    }
+
+    @Test
+    @DisplayName("AUD-P1-005: Active transaction + active sync registers afterCommit and emits success log only on commit")
+    void sendNotification_ActiveTxAndSync_RegistersAfterCommitAndLogsOnCommit() {
+        Logger logger = (Logger) LoggerFactory.getLogger(NotificationServiceImpl.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            SendNotificationRequest request = stubNotificationSave();
+            TransactionSynchronizationManager.setActualTransactionActive(true);
+            TransactionSynchronizationManager.initSynchronization();
+
+            notificationService.sendNotification(request);
+
+            List<TransactionSynchronization> syncs = TransactionSynchronizationManager.getSynchronizations();
+            assertThat(syncs).hasSize(1);
+            assertThat(appender.list)
+                    .noneMatch(e -> e.getFormattedMessage().contains("Notification sent successfully"));
+
+            syncs.forEach(TransactionSynchronization::afterCommit);
+
+            assertThat(appender.list)
+                    .anyMatch(e -> e.getFormattedMessage().contains("Notification sent successfully"));
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
+
+    @Test
+    @DisplayName("AUD-P1-005: Transaction rollback does not emit notification success log")
+    void sendNotification_TransactionRollback_DoesNotEmitSuccessLog() {
+        Logger logger = (Logger) LoggerFactory.getLogger(NotificationServiceImpl.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            SendNotificationRequest request = stubNotificationSave();
+            TransactionSynchronizationManager.setActualTransactionActive(true);
+            TransactionSynchronizationManager.initSynchronization();
+
+            notificationService.sendNotification(request);
+
+            List<TransactionSynchronization> syncs = TransactionSynchronizationManager.getSynchronizations();
+            assertThat(syncs).hasSize(1);
+            syncs.forEach(s -> s.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK));
+
+            assertThat(appender.list)
+                    .noneMatch(e -> e.getFormattedMessage().contains("Notification sent successfully"));
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
+
+    @Test
+    @DisplayName("AUD-P1-005: Active transaction + inactive sync avoids IllegalStateException and does not emit success log")
+    void sendNotification_ActiveTxWithoutSync_NoExceptionAndNoSuccessLog() {
+        Logger logger = (Logger) LoggerFactory.getLogger(NotificationServiceImpl.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            SendNotificationRequest request = stubNotificationSave();
+            TransactionSynchronizationManager.setActualTransactionActive(true);
+
+            NotificationResponse response = notificationService.sendNotification(request);
+
+            assertThat(response).isNotNull();
+            assertThat(appender.list)
+                    .noneMatch(e -> e.getFormattedMessage().contains("Notification sent successfully"));
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
+
+    @Test
+    @DisplayName("AUD-P1-005: Active sync + inactive transaction does not register callback or emit success log")
+    void sendNotification_ActiveSyncWithoutActualTx_NoRegistrationAndNoSuccessLog() {
+        Logger logger = (Logger) LoggerFactory.getLogger(NotificationServiceImpl.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            SendNotificationRequest request = stubNotificationSave();
+            TransactionSynchronizationManager.setActualTransactionActive(false);
+            TransactionSynchronizationManager.initSynchronization();
+
+            NotificationResponse response = notificationService.sendNotification(request);
+
+            assertThat(response).isNotNull();
+            assertThat(TransactionSynchronizationManager.getSynchronizations()).isEmpty();
+            assertThat(appender.list)
+                    .noneMatch(e -> e.getFormattedMessage().contains("Notification sent successfully"));
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
+
+    @Test
+    @DisplayName("AUD-P1-005: Neither transaction nor sync active keeps business behavior intact without emitting success log")
+    void sendNotification_NoActiveTxOrSync_DoesNotEmitSuccessLog() {
+        Logger logger = (Logger) LoggerFactory.getLogger(NotificationServiceImpl.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            SendNotificationRequest request = stubNotificationSave();
+
+            NotificationResponse response = notificationService.sendNotification(request);
+
+            assertThat(response).isNotNull();
+            assertThat(response.getStatus()).isEqualTo(NotificationStatus.SENT);
+            assertThat(appender.list)
+                    .noneMatch(e -> e.getFormattedMessage().contains("Notification sent successfully"));
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
+
+    private SendNotificationRequest stubNotificationSave() {
+        SendNotificationRequest request = new SendNotificationRequest(
+                UUID.randomUUID(),
+                "Title",
+                "Content",
+                "TRIP_STARTED"
+        );
+        when(notificationRepository.save(any(NotificationEntity.class)))
+                .thenAnswer(invocation -> {
+                    NotificationEntity entity = invocation.getArgument(0);
+                    entity.setId(UUID.randomUUID());
+                    if (entity.getCreatedAt() == null) {
+                        entity.setCreatedAt(Instant.now());
+                    }
+                    return entity;
+                });
+        return request;
     }
 }
 

@@ -108,6 +108,10 @@ public class NotificationEntity {
         if (this.updatedAt == null) {
             this.updatedAt = now;
         }
+        // Invariant: sentAt must not precede createdAt
+        if (this.sentAt != null && this.sentAt.isBefore(this.createdAt)) {
+            this.sentAt = this.createdAt;
+        }
         if (this.channel == null) {
             this.channel = NotificationChannel.SIMULATED;
         }

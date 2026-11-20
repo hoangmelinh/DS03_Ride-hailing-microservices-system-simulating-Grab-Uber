@@ -104,6 +104,10 @@ public class PaymentEntity {
         if (this.updatedAt == null) {
             this.updatedAt = now;
         }
+        // Invariant: completedAt must not precede createdAt
+        if (this.completedAt != null && this.completedAt.isBefore(this.createdAt)) {
+            this.completedAt = this.createdAt;
+        }
         if (this.status == null) {
             this.status = PaymentStatus.PENDING;
         }
