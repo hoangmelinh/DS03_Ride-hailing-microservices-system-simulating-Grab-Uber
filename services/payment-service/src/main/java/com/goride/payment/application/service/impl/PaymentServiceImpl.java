@@ -129,8 +129,39 @@ public class PaymentServiceImpl implements PaymentService {
             return PaymentResponse.from(existing);
         }
 
-        // 2. Prepare and save PaymentEntity
+        // 2. Check for failure condition (e.g. non-positive amount)
         Instant now = Instant.now();
+        if (amount.compareTo(BigDecimal.ZERO) <= 0) {
+            log.warn("Payment failed for tripId={} due to non-positive amount: {}", tripId, amount);
+            PaymentEntity failedPayment = new PaymentEntity();
+            failedPayment.setTripId(tripId);
+            failedPayment.setPassengerId(passengerId);
+            failedPayment.setAmount(amount);
+            failedPayment.setCurrency("VND");
+            failedPayment.setStatus(PaymentStatus.FAILED);
+            failedPayment.setProvider("SIMULATED");
+            failedPayment.setProviderReference("SIM-PAY-FAILED-" + UUID.randomUUID());
+            failedPayment.setCreatedAt(now);
+            failedPayment.setUpdatedAt(now);
+            PaymentEntity savedFailedPayment = paymentRepository.save(failedPayment);
+
+            PaymentAttemptEntity attempt = new PaymentAttemptEntity();
+            attempt.setPayment(savedFailedPayment);
+            attempt.setAttemptNo(1);
+            attempt.setStatus(PaymentAttemptStatus.FAILED);
+            attempt.setFailureCode("INVALID_FARE_AMOUNT");
+            attempt.setFailureMessage("Fare amount must be greater than zero");
+            attempt.setRequestedAt(now);
+            attempt.setCompletedAt(now);
+            paymentAttemptRepository.save(attempt);
+
+            saveFailedOutboxEvent(savedFailedPayment, "INVALID_FARE_AMOUNT", "Fare amount must be greater than zero",
+                    correlationId != null ? correlationId : UUID.randomUUID(), causationId, now);
+
+            return PaymentResponse.from(savedFailedPayment);
+        }
+
+        // 3. Prepare and save PaymentEntity for successful payment
         PaymentEntity payment = new PaymentEntity();
         payment.setTripId(tripId);
         payment.setPassengerId(passengerId);
@@ -195,6 +226,44 @@ public class PaymentServiceImpl implements PaymentService {
                     outboxEvent.getId(), savedPayment.getId());
         } catch (Exception e) {
             log.error("Failed to serialize and save outbox event for paymentId={}", savedPayment.getId(), e);
+            throw new RuntimeException("Failed to persist outbox event", e);
+        }
+    }
+
+    private void saveFailedOutboxEvent(PaymentEntity savedPayment, String failureCode, String failureMessage,
+                                       UUID correlationId, UUID causationId, Instant now) {
+        if (outboxEventRepository == null) {
+            return;
+        }
+        com.goride.common.event.PaymentFailedPayload eventPayload = new com.goride.common.event.PaymentFailedPayload(
+                savedPayment.getId(),
+                savedPayment.getTripId(),
+                savedPayment.getPassengerId(),
+                savedPayment.getAmount(),
+                savedPayment.getCurrency(),
+                failureCode,
+                failureMessage,
+                now
+        );
+        try {
+            String payloadJson = objectMapper != null
+                    ? objectMapper.writeValueAsString(eventPayload)
+                    : "{}";
+            OutboxEventEntity outboxEvent = new OutboxEventEntity(
+                    UUID.randomUUID(),
+                    "PAYMENT",
+                    savedPayment.getId(),
+                    "payment.failed",
+                    payloadJson,
+                    correlationId != null ? correlationId : UUID.randomUUID(),
+                    causationId,
+                    now
+            );
+            outboxEventRepository.save(outboxEvent);
+            log.info("Created outbox event [id={}, type=payment.failed, paymentId={}]",
+                    outboxEvent.getId(), savedPayment.getId());
+        } catch (Exception e) {
+            log.error("Failed to serialize and save payment.failed outbox event for paymentId={}", savedPayment.getId(), e);
             throw new RuntimeException("Failed to persist outbox event", e);
         }
     }

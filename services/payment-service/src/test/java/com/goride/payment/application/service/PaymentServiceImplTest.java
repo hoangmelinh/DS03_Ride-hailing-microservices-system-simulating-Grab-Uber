@@ -381,4 +381,47 @@ class PaymentServiceImplTest {
         verify(paymentRepository, never()).save(any(PaymentEntity.class));
         verify(mockOutboxRepo, never()).save(any(OutboxEventEntity.class));
     }
+
+    @Test
+    @DisplayName("processPaymentFromTripCompleted: Non-positive fare creates failed payment and payment.failed outbox event")
+    void processPaymentFromTripCompleted_Failure_WhenAmountNonPositive() {
+        OutboxEventRepository mockOutboxRepo = mock(OutboxEventRepository.class);
+        ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        PaymentServiceImpl serviceWithOutbox = new PaymentServiceImpl(
+                paymentRepository, paymentAttemptRepository, mockOutboxRepo, mapper
+        );
+
+        when(paymentRepository.findByTripId(tripId)).thenReturn(Optional.empty());
+
+        BigDecimal zeroFare = BigDecimal.ZERO;
+        PaymentEntity failedPayment = new PaymentEntity(tripId, passengerId, zeroFare, "VND");
+        failedPayment.setId(UUID.randomUUID());
+        failedPayment.setStatus(PaymentStatus.FAILED);
+        failedPayment.setProvider("SIMULATED");
+        failedPayment.setProviderReference("SIM-PAY-FAILED-123");
+        failedPayment.setCreatedAt(Instant.now());
+        when(paymentRepository.save(any(PaymentEntity.class))).thenReturn(failedPayment);
+
+        UUID correlationId = UUID.randomUUID();
+        UUID causationId = UUID.randomUUID();
+
+        PaymentResponse response = serviceWithOutbox.processPaymentFromTripCompleted(
+                tripId, passengerId, zeroFare, correlationId, causationId
+        );
+
+        assertThat(response).isNotNull();
+        assertThat(response.status()).isEqualTo(PaymentStatus.FAILED);
+
+        verify(paymentRepository).save(any(PaymentEntity.class));
+        verify(paymentAttemptRepository).save(any(PaymentAttemptEntity.class));
+
+        ArgumentCaptor<OutboxEventEntity> outboxCaptor = ArgumentCaptor.forClass(OutboxEventEntity.class);
+        verify(mockOutboxRepo).save(outboxCaptor.capture());
+        OutboxEventEntity outboxEvent = outboxCaptor.getValue();
+        assertThat(outboxEvent.getEventType()).isEqualTo("payment.failed");
+        assertThat(outboxEvent.getAggregateType()).isEqualTo("PAYMENT");
+        assertThat(outboxEvent.getCorrelationId()).isEqualTo(correlationId);
+        assertThat(outboxEvent.getCausationId()).isEqualTo(causationId);
+        assertThat(outboxEvent.getPayload()).contains("INVALID_FARE_AMOUNT");
+    }
 }

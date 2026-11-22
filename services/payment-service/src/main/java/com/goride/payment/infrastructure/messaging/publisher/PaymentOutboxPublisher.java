@@ -8,6 +8,8 @@ import com.goride.payment.infrastructure.persistence.entity.OutboxEventEntity;
 import com.goride.payment.infrastructure.persistence.repository.OutboxEventRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.amqp.AmqpException;
+import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -18,6 +20,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Background worker polling outbox_event table for PENDING payment events
@@ -38,6 +42,12 @@ public class PaymentOutboxPublisher {
 
     @Value("${goride.outbox.publisher.max-retries:3}")
     private int maxRetries;
+
+    @Value("${goride.outbox.publisher.await-confirm:true}")
+    private boolean awaitConfirm;
+
+    @Value("${goride.outbox.publisher.confirm-timeout-ms:2000}")
+    private long confirmTimeoutMs;
 
     public PaymentOutboxPublisher(OutboxEventRepository outboxEventRepository,
                                   RabbitTemplate rabbitTemplate,
@@ -80,7 +90,20 @@ public class PaymentOutboxPublisher {
                     payloadNode
             );
 
-            rabbitTemplate.convertAndSend(exchangeName, event.getEventType(), envelope);
+            CorrelationData correlationData = new CorrelationData(event.getId().toString());
+            rabbitTemplate.convertAndSend(exchangeName, event.getEventType(), envelope, correlationData);
+
+            if (awaitConfirm && correlationData.getFuture() != null) {
+                try {
+                    CorrelationData.Confirm confirm = correlationData.getFuture().get(confirmTimeoutMs, TimeUnit.MILLISECONDS);
+                    if (confirm != null && !confirm.isAck()) {
+                        throw new AmqpException("RabbitMQ broker returned NACK for outbox event id=" + event.getId()
+                                + ", reason=" + confirm.getReason());
+                    }
+                } catch (TimeoutException te) {
+                    throw new AmqpException("Publisher confirm timed out for outbox event id=" + event.getId(), te);
+                }
+            }
 
             event.setStatus(OutboxStatus.PUBLISHED);
             event.setPublishedAt(Instant.now());

@@ -12,6 +12,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -44,6 +45,7 @@ class PaymentOutboxPublisherTest {
         publisher = new PaymentOutboxPublisher(outboxEventRepository, rabbitTemplate, objectMapper);
         ReflectionTestUtils.setField(publisher, "exchangeName", "goride.events");
         ReflectionTestUtils.setField(publisher, "maxRetries", 3);
+        ReflectionTestUtils.setField(publisher, "awaitConfirm", false);
     }
 
     @Test
@@ -69,7 +71,7 @@ class PaymentOutboxPublisherTest {
 
         publisher.publishPendingEvents();
 
-        verify(rabbitTemplate).convertAndSend(eq("goride.events"), eq("payment.succeeded"), any(Object.class));
+        verify(rabbitTemplate).convertAndSend(eq("goride.events"), eq("payment.succeeded"), any(Object.class), any(CorrelationData.class));
 
         ArgumentCaptor<OutboxEventEntity> captor = ArgumentCaptor.forClass(OutboxEventEntity.class);
         verify(outboxEventRepository).save(captor.capture());
@@ -99,7 +101,7 @@ class PaymentOutboxPublisherTest {
         when(outboxEventRepository.findPendingEventsToPublish(eq(OutboxStatus.PENDING), any(), any()))
                 .thenReturn(List.of(event));
         doThrow(new RuntimeException("RabbitMQ connection refused"))
-                .when(rabbitTemplate).convertAndSend(any(), any(), any(Object.class));
+                .when(rabbitTemplate).convertAndSend(any(), any(), any(Object.class), any(CorrelationData.class));
 
         publisher.publishPendingEvents();
 
@@ -132,7 +134,7 @@ class PaymentOutboxPublisherTest {
         when(outboxEventRepository.findPendingEventsToPublish(eq(OutboxStatus.PENDING), any(), any()))
                 .thenReturn(List.of(event));
         doThrow(new RuntimeException("Broker unavailable"))
-                .when(rabbitTemplate).convertAndSend(any(), any(), any(Object.class));
+                .when(rabbitTemplate).convertAndSend(any(), any(), any(Object.class), any(CorrelationData.class));
 
         publisher.publishPendingEvents();
 
@@ -141,5 +143,64 @@ class PaymentOutboxPublisherTest {
         OutboxEventEntity saved = captor.getValue();
         assertThat(saved.getRetryCount()).isEqualTo(3);
         assertThat(saved.getStatus()).isEqualTo(OutboxStatus.FAILED);
+    }
+
+    @Test
+    @DisplayName("publishPendingEvents: Broker positive ACK marks event as PUBLISHED")
+    void publishPendingEvents_WithBrokerAck_MarksPublished() {
+        ReflectionTestUtils.setField(publisher, "awaitConfirm", true);
+        UUID eventId = UUID.randomUUID();
+        UUID aggregateId = UUID.randomUUID();
+        OutboxEventEntity event = new OutboxEventEntity(
+                eventId, "PAYMENT", aggregateId, "payment.succeeded",
+                "{\"paymentId\":\"" + aggregateId + "\"}", UUID.randomUUID(), null, Instant.now()
+        );
+
+        when(outboxEventRepository.findPendingEventsToPublish(eq(OutboxStatus.PENDING), any(), any()))
+                .thenReturn(List.of(event));
+
+        org.mockito.Mockito.doAnswer(invocation -> {
+            CorrelationData cd = invocation.getArgument(3);
+            cd.getFuture().complete(new CorrelationData.Confirm(true, null));
+            return null;
+        }).when(rabbitTemplate).convertAndSend(any(), any(), any(Object.class), any(CorrelationData.class));
+
+        publisher.publishPendingEvents();
+
+        ArgumentCaptor<OutboxEventEntity> captor = ArgumentCaptor.forClass(OutboxEventEntity.class);
+        verify(outboxEventRepository).save(captor.capture());
+        OutboxEventEntity saved = captor.getValue();
+        assertThat(saved.getStatus()).isEqualTo(OutboxStatus.PUBLISHED);
+        assertThat(saved.getPublishedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("publishPendingEvents: Broker NACK triggers retry and exponential backoff")
+    void publishPendingEvents_WithBrokerNack_RetriesEvent() {
+        ReflectionTestUtils.setField(publisher, "awaitConfirm", true);
+        UUID eventId = UUID.randomUUID();
+        UUID aggregateId = UUID.randomUUID();
+        OutboxEventEntity event = new OutboxEventEntity(
+                eventId, "PAYMENT", aggregateId, "payment.succeeded",
+                "{\"paymentId\":\"" + aggregateId + "\"}", UUID.randomUUID(), null, Instant.now()
+        );
+
+        when(outboxEventRepository.findPendingEventsToPublish(eq(OutboxStatus.PENDING), any(), any()))
+                .thenReturn(List.of(event));
+
+        org.mockito.Mockito.doAnswer(invocation -> {
+            CorrelationData cd = invocation.getArgument(3);
+            cd.getFuture().complete(new CorrelationData.Confirm(false, "Queue quota exceeded"));
+            return null;
+        }).when(rabbitTemplate).convertAndSend(any(), any(), any(Object.class), any(CorrelationData.class));
+
+        publisher.publishPendingEvents();
+
+        ArgumentCaptor<OutboxEventEntity> captor = ArgumentCaptor.forClass(OutboxEventEntity.class);
+        verify(outboxEventRepository).save(captor.capture());
+        OutboxEventEntity saved = captor.getValue();
+        assertThat(saved.getRetryCount()).isEqualTo(1);
+        assertThat(saved.getStatus()).isEqualTo(OutboxStatus.PENDING);
+        assertThat(saved.getNextRetryAt()).isNotNull();
     }
 }
