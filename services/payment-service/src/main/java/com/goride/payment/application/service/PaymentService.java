@@ -26,4 +26,18 @@ public interface PaymentService {
      * @return PaymentResponse containing payment details
      */
     PaymentResponse getPaymentByTripId(UUID tripId);
+
+    /**
+     * Process payment triggered by domain event 'trip.completed'.
+     * Idempotent by tripId; records Transactional Outbox event.
+     *
+     * @param tripId trip identifier
+     * @param passengerId passenger identifier
+     * @param amount final fare amount
+     * @param correlationId tracing correlation ID
+     * @param causationId trigger event ID
+     * @return PaymentResponse containing payment details
+     */
+    PaymentResponse processPaymentFromTripCompleted(UUID tripId, UUID passengerId, java.math.BigDecimal amount,
+                                                    UUID correlationId, UUID causationId);
 }

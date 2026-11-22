@@ -2,6 +2,8 @@ package com.goride.common;
 
 import com.goride.common.dto.ApiResponse;
 import com.goride.common.event.EventEnvelope;
+import com.goride.common.event.PaymentCompletedPayload;
+import com.goride.common.event.PaymentFailedPayload;
 import com.goride.common.exception.DuplicateResourceException;
 import com.goride.common.exception.EntityNotFoundException;
 import com.goride.common.handler.BaseGlobalExceptionHandler;
@@ -10,6 +12,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -99,5 +103,49 @@ class CommonModuleTest {
         assertEquals("INVALID_PARAMETER", response.getBody().getError().getCode());
         assertTrue(response.getBody().getError().getMessage().contains("tripId"));
         assertTrue(response.getBody().getError().getMessage().contains("UUID"));
+    }
+
+    @Test
+    void testPaymentCompletedPayload() {
+        UUID paymentId = UUID.randomUUID();
+        UUID tripId = UUID.randomUUID();
+        UUID passengerId = UUID.randomUUID();
+        BigDecimal amount = new BigDecimal("75000.00");
+        Instant now = Instant.now();
+
+        PaymentCompletedPayload payload = new PaymentCompletedPayload(
+                paymentId, tripId, passengerId, amount, "VND", "SIMULATED", "SIM-123", now
+        );
+
+        assertEquals(paymentId, payload.getPaymentId());
+        assertEquals(tripId, payload.getTripId());
+        assertEquals(passengerId, payload.getPassengerId());
+        assertEquals(amount, payload.getAmount());
+        assertEquals("VND", payload.getCurrency());
+        assertEquals("SIMULATED", payload.getProvider());
+        assertEquals("SIM-123", payload.getProviderReference());
+        assertEquals(now, payload.getCompletedAt());
+    }
+
+    @Test
+    void testPaymentFailedPayload() {
+        UUID paymentId = UUID.randomUUID();
+        UUID tripId = UUID.randomUUID();
+        UUID passengerId = UUID.randomUUID();
+        BigDecimal amount = new BigDecimal("75000.00");
+        Instant now = Instant.now();
+
+        PaymentFailedPayload payload = new PaymentFailedPayload(
+                paymentId, tripId, passengerId, amount, "VND", "CARD_DECLINED", "Card has expired", now
+        );
+
+        assertEquals(paymentId, payload.getPaymentId());
+        assertEquals(tripId, payload.getTripId());
+        assertEquals(passengerId, payload.getPassengerId());
+        assertEquals(amount, payload.getAmount());
+        assertEquals("VND", payload.getCurrency());
+        assertEquals("CARD_DECLINED", payload.getFailureCode());
+        assertEquals("Card has expired", payload.getFailureMessage());
+        assertEquals(now, payload.getFailedAt());
     }
 }

@@ -5,6 +5,7 @@ import com.goride.notification.infrastructure.persistence.repository.Notificatio
 import com.goride.notification.infrastructure.persistence.repository.NotificationRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -30,6 +31,9 @@ class NotificationServiceApplicationTests {
 
     @MockBean
     private NotificationDeadLetterRepository deadLetterRepository;
+
+    @MockBean
+    private ConnectionFactory connectionFactory;
 
     @Test
     void contextLoads() {
