@@ -20,6 +20,10 @@ public interface DriverSpringDataJpaRepository extends JpaRepository<DriverJpaEn
 
     Optional<DriverJpaEntity> findByLicenseNumber(String licenseNumber);
 
+    boolean existsByLicenseNumber(String licenseNumber);
+
+    boolean existsByUserId(UUID userId);
+
     List<DriverJpaEntity> findByStatus(DriverStatus status);
 
     /**

@@ -40,6 +40,12 @@ public class DriverReservationRepositoryAdapter implements DriverReservationRepo
     }
 
     @Override
+    public Optional<DriverReservation> findLatestByDriverIdAndTripId(UUID driverId, UUID tripId) {
+        return jpaRepository.findTopByDriverIdAndTripIdOrderByCreatedAtDesc(driverId, tripId)
+                .map(PersistenceDomainMapper::toDomain);
+    }
+
+    @Override
     public DriverReservation save(DriverReservation reservation) {
         DriverReservationJpaEntity entity = PersistenceDomainMapper.toJpa(reservation);
         DriverReservationJpaEntity saved = jpaRepository.save(entity);

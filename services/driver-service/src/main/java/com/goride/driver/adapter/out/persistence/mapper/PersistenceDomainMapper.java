@@ -3,10 +3,12 @@ package com.goride.driver.adapter.out.persistence.mapper;
 import com.goride.driver.adapter.out.persistence.entity.DriverJpaEntity;
 import com.goride.driver.adapter.out.persistence.entity.DriverLocationJpaEntity;
 import com.goride.driver.adapter.out.persistence.entity.DriverReservationJpaEntity;
+import com.goride.driver.adapter.out.persistence.entity.OutboxEventJpaEntity;
 import com.goride.driver.adapter.out.persistence.entity.VehicleJpaEntity;
 import com.goride.driver.domain.model.Driver;
 import com.goride.driver.domain.model.DriverLocation;
 import com.goride.driver.domain.model.DriverReservation;
+import com.goride.driver.domain.model.OutboxEvent;
 import com.goride.driver.domain.model.Vehicle;
 
 public final class PersistenceDomainMapper {
@@ -130,5 +132,45 @@ public final class PersistenceDomainMapper {
                 domain.getCreatedAt(),
                 domain.getUpdatedAt()
         );
+    }
+
+    public static OutboxEvent toDomain(OutboxEventJpaEntity entity) {
+        if (entity == null) return null;
+        return new OutboxEvent(
+                entity.getId(),
+                entity.getAggregateType(),
+                entity.getAggregateId(),
+                entity.getEventType(),
+                entity.getEventVersion(),
+                entity.getPayload(),
+                entity.getCorrelationId(),
+                entity.getCausationId(),
+                entity.getOccurredAt(),
+                entity.getStatus(),
+                entity.getRetryCount(),
+                entity.getNextRetryAt(),
+                entity.getPublishedAt(),
+                entity.getCreatedAt()
+        );
+    }
+
+    public static OutboxEventJpaEntity toJpa(OutboxEvent domain) {
+        if (domain == null) return null;
+        OutboxEventJpaEntity entity = new OutboxEventJpaEntity();
+        entity.setId(domain.getId());
+        entity.setAggregateType(domain.getAggregateType());
+        entity.setAggregateId(domain.getAggregateId());
+        entity.setEventType(domain.getEventType());
+        entity.setEventVersion(domain.getEventVersion());
+        entity.setPayload(domain.getPayload());
+        entity.setCorrelationId(domain.getCorrelationId());
+        entity.setCausationId(domain.getCausationId());
+        entity.setOccurredAt(domain.getOccurredAt());
+        entity.setStatus(domain.getStatus());
+        entity.setRetryCount(domain.getRetryCount());
+        entity.setNextRetryAt(domain.getNextRetryAt());
+        entity.setPublishedAt(domain.getPublishedAt());
+        entity.setCreatedAt(domain.getCreatedAt());
+        return entity;
     }
 }

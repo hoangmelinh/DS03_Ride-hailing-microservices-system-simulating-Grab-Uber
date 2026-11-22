@@ -33,6 +33,21 @@ public class DriverRepositoryAdapter implements DriverRepository {
     }
 
     @Override
+    public Optional<Driver> findByLicenseNumber(String licenseNumber) {
+        return jpaRepository.findByLicenseNumber(licenseNumber).map(PersistenceDomainMapper::toDomain);
+    }
+
+    @Override
+    public boolean existsByLicenseNumber(String licenseNumber) {
+        return jpaRepository.existsByLicenseNumber(licenseNumber);
+    }
+
+    @Override
+    public boolean existsByUserId(UUID userId) {
+        return jpaRepository.existsByUserId(userId);
+    }
+
+    @Override
     public List<Driver> findByStatus(DriverStatus status) {
         return jpaRepository.findByStatus(status)
                 .stream()
