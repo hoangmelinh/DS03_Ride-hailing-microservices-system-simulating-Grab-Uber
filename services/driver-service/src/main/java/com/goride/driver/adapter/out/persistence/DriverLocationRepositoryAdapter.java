@@ -7,6 +7,8 @@ import com.goride.driver.domain.model.DriverLocation;
 import com.goride.driver.domain.repository.DriverLocationRepository;
 import org.springframework.stereotype.Component;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -22,6 +24,16 @@ public class DriverLocationRepositoryAdapter implements DriverLocationRepository
     @Override
     public Optional<DriverLocation> findByDriverId(UUID driverId) {
         return jpaRepository.findById(driverId).map(PersistenceDomainMapper::toDomain);
+    }
+
+    @Override
+    public List<DriverLocation> findByDriverIds(Collection<UUID> driverIds) {
+        if (driverIds == null || driverIds.isEmpty()) {
+            return List.of();
+        }
+        return jpaRepository.findByDriverIdIn(driverIds).stream()
+                .map(PersistenceDomainMapper::toDomain)
+                .toList();
     }
 
     @Override

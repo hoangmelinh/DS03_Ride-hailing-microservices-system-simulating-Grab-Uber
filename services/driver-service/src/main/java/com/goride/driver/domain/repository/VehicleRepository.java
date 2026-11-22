@@ -12,6 +12,8 @@ public interface VehicleRepository {
 
     Optional<Vehicle> findByPlateNumber(String plateNumber);
 
+    boolean existsByPlateNumber(String plateNumber);
+
     List<Vehicle> findByDriverId(UUID driverId);
 
     Vehicle save(Vehicle vehicle);

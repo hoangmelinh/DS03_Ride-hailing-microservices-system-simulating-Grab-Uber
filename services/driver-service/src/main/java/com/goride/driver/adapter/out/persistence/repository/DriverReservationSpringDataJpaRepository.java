@@ -21,4 +21,6 @@ public interface DriverReservationSpringDataJpaRepository extends JpaRepository<
     @Query("SELECT r FROM DriverReservationJpaEntity r " +
            "WHERE r.tripId = :tripId AND r.status IN ('RESERVED', 'CONFIRMED')")
     Optional<DriverReservationJpaEntity> findActiveByTripId(@Param("tripId") UUID tripId);
+
+    Optional<DriverReservationJpaEntity> findTopByDriverIdAndTripIdOrderByCreatedAtDesc(UUID driverId, UUID tripId);
 }

@@ -19,6 +19,12 @@
     <description>Driver profile, location, status and atomic reservation bounded context</description>
 
     <dependencies>
+        <!-- Common Technical Library (ApiResponse, EventEnvelope, Exceptions, Handlers) -->
+        <dependency>
+            <groupId>com.goride</groupId>
+            <artifactId>goride-common</artifactId>
+        </dependency>
+
         <!-- Spring Boot Starter Web for REST endpoints -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

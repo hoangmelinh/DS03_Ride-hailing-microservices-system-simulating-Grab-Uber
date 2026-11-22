@@ -15,5 +15,7 @@ public interface DriverReservationRepository {
 
     Optional<DriverReservation> findActiveByTripId(UUID tripId);
 
+    Optional<DriverReservation> findLatestByDriverIdAndTripId(UUID driverId, UUID tripId);
+
     DriverReservation save(DriverReservation reservation);
 }

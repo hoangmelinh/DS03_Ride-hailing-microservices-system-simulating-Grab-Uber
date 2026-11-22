@@ -14,6 +14,12 @@ public interface DriverRepository {
 
     Optional<Driver> findByUserId(UUID userId);
 
+    Optional<Driver> findByLicenseNumber(String licenseNumber);
+
+    boolean existsByLicenseNumber(String licenseNumber);
+
+    boolean existsByUserId(UUID userId);
+
     List<Driver> findByStatus(DriverStatus status);
 
     Driver save(Driver driver);

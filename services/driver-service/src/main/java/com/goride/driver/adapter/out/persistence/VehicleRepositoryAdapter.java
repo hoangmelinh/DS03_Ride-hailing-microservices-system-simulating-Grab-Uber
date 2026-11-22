@@ -31,6 +31,11 @@ public class VehicleRepositoryAdapter implements VehicleRepository {
     }
 
     @Override
+    public boolean existsByPlateNumber(String plateNumber) {
+        return jpaRepository.existsByPlateNumber(plateNumber);
+    }
+
+    @Override
     public List<Vehicle> findByDriverId(UUID driverId) {
         return jpaRepository.findByDriverId(driverId)
                 .stream()

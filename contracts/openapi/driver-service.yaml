@@ -1,0 +1,436 @@
+openapi: 3.0.3
+info:
+  title: GoRide :: Driver Service REST API
+  description: API contract for Driver Service managing driver registration, status, and GPS location.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8082
+    description: Local Driver Service
+  - url: http://localhost:8080/api/v1/drivers
+    description: Via API Gateway
+
+paths:
+  /api/v1/drivers:
+    post:
+      summary: Register a new driver profile and vehicle
+      description: |
+        Registers a new driver profile linked to an existing User Service account (via userId),
+        along with the driver's primary vehicle. Status defaults to OFFLINE.
+      operationId: registerDriver
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterDriverRequest'
+      responses:
+        '201':
+          description: Driver successfully registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriverApiResponse'
+        '400':
+          description: Validation error (missing or invalid fields)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+        '409':
+          description: Duplicate resource (userId, licenseNumber, or vehiclePlate already exists)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+
+  /api/v1/drivers/{id}/status:
+    patch:
+      summary: Update driver availability status
+      description: |
+        Transitions driver between OFFLINE and ONLINE (AVAILABLE).
+        ONLINE drivers become AVAILABLE to receive trip assignments.
+      operationId: updateDriverStatus
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Driver UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDriverStatusRequest'
+      responses:
+        '200':
+          description: Driver status updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriverStatusApiResponse'
+        '400':
+          description: Invalid status value
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+        '404':
+          description: Driver not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+
+  /api/v1/drivers/{id}/location:
+    put:
+      summary: Update driver GPS coordinates
+      description: Updates or inserts latest GPS location for the driver in driver_locations table.
+      operationId: updateDriverLocation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Driver UUID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDriverLocationRequest'
+      responses:
+        '200':
+          description: Location updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DriverLocationApiResponse'
+        '400':
+          description: Invalid coordinates (out of range)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+        '404':
+          description: Driver not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+
+  /api/v1/drivers/{id}/reserve:
+    post:
+      summary: Atomic driver reservation
+      description: Atomically reserves a driver for a trip (guaranteeing one trip per driver). Idempotent via Idempotency-Key.
+      operationId: reserveDriver
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Driver UUID
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Unique idempotency key to prevent double reservations
+          schema:
+            type: string
+        - name: X-Correlation-Id
+          in: header
+          required: false
+          description: Distributed tracing correlation ID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReserveDriverRequest'
+      responses:
+        '200':
+          description: Driver reserved successfully (or idempotent replay)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReserveDriverApiResponse'
+        '400':
+          description: Validation error or missing header
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+        '404':
+          description: Driver not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+        '409':
+          description: Driver not available, already reserved, or idempotency conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorApiResponse'
+
+components:
+  schemas:
+    RegisterDriverRequest:
+      type: object
+      required:
+        - userId
+        - licenseNumber
+        - vehiclePlate
+        - vehicleModel
+      properties:
+        userId:
+          type: string
+          format: uuid
+          description: Reference ID of the user account managed by User Service
+          example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+        licenseNumber:
+          type: string
+          maxLength: 50
+          description: Driver driver's license number
+          example: GPLX-123456789
+        vehiclePlate:
+          type: string
+          maxLength: 20
+          description: Vehicle license plate number
+          example: 30A-99999
+        vehicleModel:
+          type: string
+          maxLength: 80
+          description: Vehicle make and model
+          example: Toyota Vios 2023
+
+    UpdateDriverStatusRequest:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: [ONLINE, OFFLINE]
+          example: ONLINE
+
+    UpdateDriverLocationRequest:
+      type: object
+      required:
+        - latitude
+        - longitude
+      properties:
+        latitude:
+          type: number
+          format: double
+          minimum: -90.0
+          maximum: 90.0
+          example: 10.762622
+        longitude:
+          type: number
+          format: double
+          minimum: -180.0
+          maximum: 180.0
+          example: 106.660172
+
+    VehicleResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        plateNumber:
+          type: string
+        model:
+          type: string
+        capacity:
+          type: integer
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+
+    DriverResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        licenseNumber:
+          type: string
+        status:
+          type: string
+          enum: [OFFLINE, AVAILABLE, RESERVED, ON_TRIP]
+        vehicle:
+          $ref: '#/components/schemas/VehicleResponse'
+        createdAt:
+          type: string
+          format: date-time
+
+    DriverStatusResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        licenseNumber:
+          type: string
+        status:
+          type: string
+          enum: [OFFLINE, AVAILABLE, RESERVED, ON_TRIP]
+        currentTripId:
+          type: string
+          format: uuid
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+
+    DriverLocationResponse:
+      type: object
+      properties:
+        driverId:
+          type: string
+          format: uuid
+        latitude:
+          type: number
+        longitude:
+          type: number
+        updatedAt:
+          type: string
+          format: date-time
+
+    DriverApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/DriverResponse'
+        error:
+          type: object
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+
+    DriverStatusApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/DriverStatusResponse'
+        error:
+          type: object
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+
+    DriverLocationApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/DriverLocationResponse'
+        error:
+          type: object
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+
+    ReserveDriverRequest:
+      type: object
+      required:
+        - tripId
+      properties:
+        tripId:
+          type: string
+          format: uuid
+          description: Trip UUID requesting reservation
+        ttlSeconds:
+          type: integer
+          minimum: 5
+          maximum: 300
+          default: 30
+          description: Reservation duration in seconds
+
+    ReserveDriverResponse:
+      type: object
+      properties:
+        reservationId:
+          type: string
+          format: uuid
+        driverId:
+          type: string
+          format: uuid
+        tripId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          example: RESERVED
+        expiresAt:
+          type: string
+          format: date-time
+
+    ReserveDriverApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/ReserveDriverResponse'
+        error:
+          type: object
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+
+    ErrorApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        data:
+          type: object
+          nullable: true
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: VALIDATION_ERROR
+            message:
+              type: string
+              example: User ID is required
+            details:
+              type: array
+              items:
+                type: string
+        timestamp:
+          type: string
+          format: date-time
+

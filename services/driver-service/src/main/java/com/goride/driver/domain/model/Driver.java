@@ -45,6 +45,9 @@ public class Driver {
     }
 
     public void goOnline() {
+        if (this.status == DriverStatus.AVAILABLE) {
+            return;
+        }
         if (this.status != DriverStatus.OFFLINE) {
             throw new IllegalStateException("Only OFFLINE drivers can transition to AVAILABLE");
         }
@@ -53,6 +56,9 @@ public class Driver {
     }
 
     public void goOffline() {
+        if (this.status == DriverStatus.OFFLINE) {
+            return;
+        }
         if (this.status == DriverStatus.RESERVED || this.status == DriverStatus.ON_TRIP) {
             throw new IllegalStateException("Cannot go offline while RESERVED or ON_TRIP");
         }

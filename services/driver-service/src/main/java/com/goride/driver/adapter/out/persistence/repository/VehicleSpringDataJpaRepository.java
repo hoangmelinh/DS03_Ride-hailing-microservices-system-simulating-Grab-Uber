@@ -13,5 +13,7 @@ public interface VehicleSpringDataJpaRepository extends JpaRepository<VehicleJpa
 
     Optional<VehicleJpaEntity> findByPlateNumber(String plateNumber);
 
+    boolean existsByPlateNumber(String plateNumber);
+
     List<VehicleJpaEntity> findByDriverId(UUID driverId);
 }

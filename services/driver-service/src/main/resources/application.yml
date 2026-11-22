@@ -5,7 +5,7 @@ spring:
   application:
     name: driver-service
   datasource:
-    url: ${DB_DRIVER_URL:jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${DB_DRIVER_NAME:goride_driver}}
+    url: ${DB_DRIVER_URL:jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5433}/${DB_DRIVER_NAME:goride_driver}}
     username: ${POSTGRES_USER:goride_admin}
     password: ${POSTGRES_PASSWORD:goride_dev_password}
     driver-class-name: org.postgresql.Driver
@@ -31,3 +31,8 @@ management:
   endpoint:
     health:
       show-details: always
+
+goride:
+  driver:
+    available-default-limit: 20
+    available-max-limit: 100

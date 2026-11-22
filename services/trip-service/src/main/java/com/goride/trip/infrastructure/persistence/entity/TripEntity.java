@@ -11,6 +11,8 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -65,6 +67,7 @@ public class TripEntity {
     @Column(name = "final_fare", precision = 12, scale = 2)
     private BigDecimal finalFare;
 
+    @JdbcTypeCode(SqlTypes.CHAR)
     @Column(name = "currency", length = 3, nullable = false)
     private String currency = "VND";
 
