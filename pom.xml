@@ -73,6 +73,13 @@
                 <scope>import</scope>
             </dependency>
 
+            <!-- Shared Common Technical Library -->
+            <dependency>
+                <groupId>com.goride</groupId>
+                <artifactId>goride-common</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
             <!-- ArchUnit for Clean Architecture Verification -->
             <dependency>
                 <groupId>com.tngtech.archunit</groupId>

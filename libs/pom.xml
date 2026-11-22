@@ -17,4 +17,8 @@
 
     <name>GoRide :: Technical Libraries Parent</name>
     <description>Shared technical utilities adhering strictly to Clean Architecture (no business domain models)</description>
+
+    <modules>
+        <module>goride-common</module>
+    </modules>
 </project>
