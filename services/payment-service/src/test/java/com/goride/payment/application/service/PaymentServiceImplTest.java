@@ -49,6 +49,15 @@ class PaymentServiceImplTest {
     @Mock
     private PaymentAttemptRepository paymentAttemptRepository;
 
+    @Mock
+    private com.goride.payment.infrastructure.persistence.repository.InboxEventRepository inboxEventRepository;
+
+    @Mock
+    private com.goride.payment.infrastructure.persistence.repository.OutboxEventRepository outboxEventRepository;
+
+    @org.mockito.Spy
+    private com.fasterxml.jackson.databind.ObjectMapper objectMapper = new com.fasterxml.jackson.databind.ObjectMapper();
+
     @InjectMocks
     private PaymentServiceImpl paymentService;
 

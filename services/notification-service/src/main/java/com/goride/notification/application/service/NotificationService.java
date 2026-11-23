@@ -22,6 +22,13 @@ public interface NotificationService {
     NotificationResponse sendNotification(SendNotificationRequest request);
 
     /**
+     * Process asynchronous business event from RabbitMQ and generate notification.
+     * Enforces Inbox deduplication and composite uniqueness constraint.
+     */
+    NotificationResponse processEventNotification(UUID eventId, String eventType, UUID correlationId,
+                                                   com.fasterxml.jackson.databind.JsonNode payloadNode);
+
+    /**
      * Retrieve list of notifications for a specific user ordered by createdAt descending.
      *
      * @param userId the user identifier

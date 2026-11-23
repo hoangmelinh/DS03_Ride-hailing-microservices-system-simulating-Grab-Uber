@@ -42,13 +42,16 @@ class NotificationServiceImplTest {
     @Mock
     private NotificationRepository notificationRepository;
 
+    @Mock
+    private com.goride.notification.infrastructure.persistence.repository.NotificationInboxEventRepository inboxEventRepository;
+
     private ObjectMapper objectMapper;
     private NotificationServiceImpl notificationService;
 
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
-        notificationService = new NotificationServiceImpl(notificationRepository, objectMapper);
+        notificationService = new NotificationServiceImpl(notificationRepository, inboxEventRepository, objectMapper);
     }
 
     @Test
