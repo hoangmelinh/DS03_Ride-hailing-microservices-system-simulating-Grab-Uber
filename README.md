@@ -91,7 +91,75 @@ mvn clean verify
 
 ---
 
-## 5. Các Bất Biến Kiến Trúc Bắt Buộc (Architectural Invariants)
+## 5. Hướng Dẫn Chạy Toàn Bộ Hệ Thống (Full Stack Run)
+
+### Cách 1: Chạy tự động 1-Click (Khuyên dùng)
+Trước tiên, hãy đảm bảo ứng dụng **Docker Desktop** đã được mở trên máy tính của bạn. Sau đó mở terminal tại thư mục gốc `e:/DS03`:
+
+- **Trên Windows PowerShell:**
+  ```powershell
+  .\start-all.ps1
+  ```
+- **Trên Git Bash / Linux:**
+  ```bash
+  ./start-all.sh
+  ```
+Script sẽ tự động:
+1. Kiểm tra Docker Engine và Maven package.
+2. Khởi động 7 Microservices + 3 Hạ tầng (PostgreSQL 6 DBs, RabbitMQ, Redis).
+3. Đợi Gateway sẵn sàng và tự động nạp tài khoản Passenger + Driver có tọa độ thực tế tại Hà Nội (`seed-demo-data`).
+4. Khởi chạy giao diện Demo Simulator tại `http://localhost:3000`.
+
+---
+
+### Cách 2: Chạy thủ công từng bước
+
+#### Bước 1: Bật ứng dụng Docker Desktop
+Mở Docker Desktop từ màn hình Desktop hoặc menu Start của Windows để engine Linux khởi tạo.
+
+#### Bước 2: Khởi động Backend & Hạ tầng qua Docker Compose
+Tại thư mục gốc `e:/DS03`:
+```bash
+docker compose -f deploy/docker-compose.yml up --build -d
+```
+Kiểm tra trạng thái các container:
+```bash
+docker compose -f deploy/docker-compose.yml ps
+```
+
+#### Bước 3: Nạp dữ liệu mẫu (Seed Data)
+Đợi 5-10 giây để Gateway và các Database khởi động xong, sau đó chạy:
+- Trên PowerShell: `.\scripts\seed-demo-data.ps1`
+- Trên Git Bash: `./scripts\seed-demo-data.sh`
+
+#### Bước 4: Chạy giao diện Demo Client
+```bash
+cd frontend/demo-client
+npm run dev
+```
+Truy cập trình duyệt tại: **`http://localhost:3000`**
+
+---
+
+### Bảng Cổng & Đường Dẫn Dịch Vụ
+
+| Dịch Vụ | Vai Trò | URL / Port | Thông Tin Đăng Nhập |
+| :--- | :--- | :--- | :--- |
+| **Frontend Demo UI** | Mô phỏng luồng gọi xe & 8 kịch bản phân tán | `http://localhost:3000` | Giao diện tương tác trực tiếp |
+| **API Gateway** | Điểm truy cập duy nhất vào cụm Microservices | `http://localhost:8080` | Forward JWT & Correlation ID |
+| **RabbitMQ Management** | Giám sát Message Queues, Exchanges, DLQ | `http://localhost:15672` | `goride_admin` / `goride_rabbit_password` |
+| **PostgreSQL** | Cơ sở dữ liệu phân tán (6 DBs riêng biệt) | `localhost:5432` | `goride_admin` / `goride_dev_password` |
+| **Redis** | Bộ nhớ đệm GEO phục vụ tìm kiếm tài xế | `localhost:6379` | Không mật khẩu |
+| **User Service** | Đăng ký, đăng nhập JWT, quản lý tài khoản | `http://localhost:8081` | (Qua Gateway) |
+| **Driver Service** | Quản lý tài xế, giữ chỗ nguyên tử (CAS lock) | `http://localhost:8082` | (Qua Gateway) |
+| **Trip Service** | Vòng đời chuyến đi, Transactional Outbox | `http://localhost:8083` | (Qua Gateway) |
+| **Matching Service** | Điều phối Saga ghép cuốc, Redis GEO | `http://localhost:8084` | (Qua Gateway) |
+| **Payment Service** | Xử lý thanh toán mô phỏng, Outbox/DLQ | `http://localhost:8085` | (Qua Gateway) |
+| **Notification Service** | Tiêu thụ sự kiện, Inbox Deduplication, DLQ | `http://localhost:8086` | (Qua Gateway) |
+
+---
+
+## 6. Các Bất Biến Kiến Trúc Bắt Buộc (Architectural Invariants)
 1. **Sở hữu dữ liệu**: Mỗi service sở hữu database riêng. Nghiêm cấm truy cập DB chéo hoặc tạo foreign key giữa các database.
 2. **Clean Architecture**: Domain model thuần túy, không phụ thuộc vào framework (không có annotation Spring/JPA/RabbitMQ trong domain).
 3. **Giữ chỗ nguyên tử**: Driver Service kiểm soát giữ chỗ tài xế duy nhất bằng điều kiện nguyên tử ở mức database.
