@@ -1,4 +1,7 @@
 services:
+  # ==============================================================================
+  # Infrastructure Services
+  # ==============================================================================
   postgres:
     image: postgres:16-alpine
     container_name: goride-postgres
@@ -28,8 +31,8 @@ services:
       - "${RABBITMQ_PORT:-5672}:5672"
       - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-guest}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-goride_admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-goride_rabbit_password}
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
@@ -54,6 +57,190 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    networks:
+      - goride-network
+
+  # ==============================================================================
+  # Microservices
+  # ==============================================================================
+  user-service:
+    build:
+      context: ../services/user-service
+      dockerfile: Dockerfile
+    container_name: goride-user-service
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-goride_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-goride_dev_password}
+      DB_USER_NAME: goride_user
+      DB_USER_URL: jdbc:postgresql://postgres:5432/goride_user
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - goride-network
+
+  driver-service:
+    build:
+      context: ../services/driver-service
+      dockerfile: Dockerfile
+    container_name: goride-driver-service
+    restart: unless-stopped
+    ports:
+      - "8082:8082"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-goride_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-goride_dev_password}
+      DB_DRIVER_NAME: goride_driver
+      DB_DRIVER_URL: jdbc:postgresql://postgres:5432/goride_driver
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - goride-network
+
+  trip-service:
+    build:
+      context: ../services/trip-service
+      dockerfile: Dockerfile
+    container_name: goride-trip-service
+    restart: unless-stopped
+    ports:
+      - "8083:8083"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-goride_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-goride_dev_password}
+      DB_TRIP_NAME: goride_trip
+      DB_TRIP_URL: jdbc:postgresql://postgres:5432/goride_trip
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-goride_admin}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-goride_rabbit_password}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - goride-network
+
+  matching-service:
+    build:
+      context: ../services/matching-service
+      dockerfile: Dockerfile
+    container_name: goride-matching-service
+    restart: unless-stopped
+    ports:
+      - "8084:8084"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-goride_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-goride_dev_password}
+      DB_MATCHING_NAME: goride_matching
+      DB_MATCHING_URL: jdbc:postgresql://postgres:5432/goride_matching
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-goride_admin}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-goride_rabbit_password}
+      DRIVER_SERVICE_URL: http://driver-service:8082
+      TRIP_SERVICE_URL: http://trip-service:8083
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      driver-service:
+        condition: service_started
+      trip-service:
+        condition: service_started
+    networks:
+      - goride-network
+
+  payment-service:
+    build:
+      context: ../services/payment-service
+      dockerfile: Dockerfile
+    container_name: goride-payment-service
+    restart: unless-stopped
+    ports:
+      - "8085:8085"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-goride_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-goride_dev_password}
+      DB_PAYMENT_NAME: goride_payment
+      DB_PAYMENT_URL: jdbc:postgresql://postgres:5432/goride_payment
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-goride_admin}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-goride_rabbit_password}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - goride-network
+
+  notification-service:
+    build:
+      context: ../services/notification-service
+      dockerfile: Dockerfile
+    container_name: goride-notification-service
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-goride_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-goride_dev_password}
+      DB_NOTIFICATION_NAME: goride_notification
+      DB_NOTIFICATION_URL: jdbc:postgresql://postgres:5432/goride_notification
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-goride_admin}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-goride_rabbit_password}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - goride-network
+
+  api-gateway:
+    build:
+      context: ../services/api-gateway
+      dockerfile: Dockerfile
+    container_name: goride-api-gateway
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      USER_SERVICE_URI: http://user-service:8081
+      DRIVER_SERVICE_URI: http://driver-service:8082
+      TRIP_SERVICE_URI: http://trip-service:8083
+      MATCHING_SERVICE_URI: http://matching-service:8084
+      PAYMENT_SERVICE_URI: http://payment-service:8085
+      NOTIFICATION_SERVICE_URI: http://notification-service:8086
+    depends_on:
+      - user-service
+      - driver-service
+      - trip-service
+      - matching-service
+      - payment-service
+      - notification-service
     networks:
       - goride-network
 

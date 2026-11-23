@@ -1,9 +1,10 @@
 package com.goride.payment;
 
-import com.goride.payment.infrastructure.persistence.repository.PaymentAttemptRepository;
-import com.goride.payment.infrastructure.persistence.repository.PaymentRepository;
+import com.goride.payment.infrastructure.persistence.repository.*;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.rabbit.connection.ConnectionFactory;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -14,7 +15,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest
+@SpringBootTest(properties = {
+        "spring.rabbitmq.listener.simple.auto-startup=false",
+        "goride.outbox.publisher.enabled=false"
+})
 @AutoConfigureMockMvc
 class PaymentServiceApplicationTests {
 
@@ -26,6 +30,24 @@ class PaymentServiceApplicationTests {
 
     @MockBean
     private PaymentAttemptRepository paymentAttemptRepository;
+
+    @MockBean
+    private InboxEventRepository inboxEventRepository;
+
+    @MockBean
+    private OutboxEventRepository outboxEventRepository;
+
+    @MockBean
+    private IdempotencyRecordRepository idempotencyRecordRepository;
+
+    @MockBean
+    private PaymentDeadLetterRepository paymentDeadLetterRepository;
+
+    @MockBean
+    private ConnectionFactory connectionFactory;
+
+    @MockBean
+    private RabbitTemplate rabbitTemplate;
 
     @Test
     void contextLoads() {

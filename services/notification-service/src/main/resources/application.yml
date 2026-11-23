@@ -22,6 +22,30 @@ spring:
     enabled: true
     baseline-on-migrate: true
     locations: classpath:db/migration
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:goride_admin}
+    password: ${RABBITMQ_PASSWORD:goride_rabbit_password}
+    listener:
+      simple:
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 1000ms
+          multiplier: 2.0
+          max-interval: 4000ms
+
+goride:
+  rabbitmq:
+    exchange: goride.events
+    dlx: goride.dead-letter.exchange
+    queues:
+      events: notification.events.q
+      dlq: notification.dead-letter.queue
+    routing-keys:
+      dlq: notification.dead-letter
 
 management:
   endpoints:
