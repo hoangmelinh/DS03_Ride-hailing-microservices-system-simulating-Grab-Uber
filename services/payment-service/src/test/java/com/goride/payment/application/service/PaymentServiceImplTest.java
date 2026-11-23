@@ -3,14 +3,18 @@ package com.goride.payment.application.service;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.goride.common.exception.EntityNotFoundException;
 import com.goride.payment.application.dto.request.ProcessPaymentRequest;
 import com.goride.payment.application.dto.response.PaymentResponse;
 import com.goride.payment.application.service.impl.PaymentServiceImpl;
 import com.goride.payment.domain.model.PaymentAttemptStatus;
 import com.goride.payment.domain.model.PaymentStatus;
+import com.goride.payment.infrastructure.persistence.entity.OutboxEventEntity;
 import com.goride.payment.infrastructure.persistence.entity.PaymentAttemptEntity;
 import com.goride.payment.infrastructure.persistence.entity.PaymentEntity;
+import com.goride.payment.infrastructure.persistence.repository.OutboxEventRepository;
 import com.goride.payment.infrastructure.persistence.repository.PaymentAttemptRepository;
 import com.goride.payment.infrastructure.persistence.repository.PaymentRepository;
 import org.junit.jupiter.api.AfterEach;
@@ -36,6 +40,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -307,5 +312,116 @@ class PaymentServiceImplTest {
         savedPayment.setCreatedAt(now);
         savedPayment.setCompletedAt(now);
         when(paymentRepository.save(any(PaymentEntity.class))).thenReturn(savedPayment);
+    }
+
+    @Test
+    @DisplayName("processPaymentFromTripCompleted: Creates payment, attempt, and outbox event")
+    void processPaymentFromTripCompleted_Success() {
+        OutboxEventRepository mockOutboxRepo = mock(OutboxEventRepository.class);
+        ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        PaymentServiceImpl serviceWithOutbox = new PaymentServiceImpl(
+                paymentRepository, paymentAttemptRepository, mockOutboxRepo, mapper
+        );
+
+        when(paymentRepository.findByTripId(tripId)).thenReturn(Optional.empty());
+
+        PaymentEntity saved = new PaymentEntity(tripId, passengerId, amount, "VND");
+        saved.setId(UUID.randomUUID());
+        saved.setStatus(PaymentStatus.SUCCEEDED);
+        saved.setProvider("SIMULATED");
+        saved.setProviderReference("SIM-PAY-999");
+        saved.setCreatedAt(Instant.now());
+        saved.setCompletedAt(Instant.now());
+        when(paymentRepository.save(any(PaymentEntity.class))).thenReturn(saved);
+
+        UUID correlationId = UUID.randomUUID();
+        UUID causationId = UUID.randomUUID();
+
+        PaymentResponse response = serviceWithOutbox.processPaymentFromTripCompleted(
+                tripId, passengerId, amount, correlationId, causationId
+        );
+
+        assertThat(response).isNotNull();
+        assertThat(response.tripId()).isEqualTo(tripId);
+        assertThat(response.status()).isEqualTo(PaymentStatus.SUCCEEDED);
+
+        verify(paymentRepository).save(any(PaymentEntity.class));
+        verify(paymentAttemptRepository).save(any(PaymentAttemptEntity.class));
+
+        ArgumentCaptor<OutboxEventEntity> outboxCaptor = ArgumentCaptor.forClass(OutboxEventEntity.class);
+        verify(mockOutboxRepo).save(outboxCaptor.capture());
+        OutboxEventEntity outboxEvent = outboxCaptor.getValue();
+        assertThat(outboxEvent.getEventType()).isEqualTo("payment.succeeded");
+        assertThat(outboxEvent.getAggregateType()).isEqualTo("PAYMENT");
+        assertThat(outboxEvent.getCorrelationId()).isEqualTo(correlationId);
+        assertThat(outboxEvent.getCausationId()).isEqualTo(causationId);
+        assertThat(outboxEvent.getPayload()).contains(tripId.toString());
+    }
+
+    @Test
+    @DisplayName("processPaymentFromTripCompleted: Returns existing payment when already paid")
+    void processPaymentFromTripCompleted_ExistingPayment_Idempotent() {
+        OutboxEventRepository mockOutboxRepo = mock(OutboxEventRepository.class);
+        ObjectMapper mapper = new ObjectMapper();
+        PaymentServiceImpl serviceWithOutbox = new PaymentServiceImpl(
+                paymentRepository, paymentAttemptRepository, mockOutboxRepo, mapper
+        );
+
+        PaymentEntity existing = new PaymentEntity(tripId, passengerId, amount, "VND");
+        existing.setId(UUID.randomUUID());
+        existing.setStatus(PaymentStatus.SUCCEEDED);
+        when(paymentRepository.findByTripId(tripId)).thenReturn(Optional.of(existing));
+
+        PaymentResponse response = serviceWithOutbox.processPaymentFromTripCompleted(
+                tripId, passengerId, amount, UUID.randomUUID(), UUID.randomUUID()
+        );
+
+        assertThat(response).isNotNull();
+        assertThat(response.id()).isEqualTo(existing.getId());
+        verify(paymentRepository, never()).save(any(PaymentEntity.class));
+        verify(mockOutboxRepo, never()).save(any(OutboxEventEntity.class));
+    }
+
+    @Test
+    @DisplayName("processPaymentFromTripCompleted: Non-positive fare creates failed payment and payment.failed outbox event")
+    void processPaymentFromTripCompleted_Failure_WhenAmountNonPositive() {
+        OutboxEventRepository mockOutboxRepo = mock(OutboxEventRepository.class);
+        ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        PaymentServiceImpl serviceWithOutbox = new PaymentServiceImpl(
+                paymentRepository, paymentAttemptRepository, mockOutboxRepo, mapper
+        );
+
+        when(paymentRepository.findByTripId(tripId)).thenReturn(Optional.empty());
+
+        BigDecimal zeroFare = BigDecimal.ZERO;
+        PaymentEntity failedPayment = new PaymentEntity(tripId, passengerId, zeroFare, "VND");
+        failedPayment.setId(UUID.randomUUID());
+        failedPayment.setStatus(PaymentStatus.FAILED);
+        failedPayment.setProvider("SIMULATED");
+        failedPayment.setProviderReference("SIM-PAY-FAILED-123");
+        failedPayment.setCreatedAt(Instant.now());
+        when(paymentRepository.save(any(PaymentEntity.class))).thenReturn(failedPayment);
+
+        UUID correlationId = UUID.randomUUID();
+        UUID causationId = UUID.randomUUID();
+
+        PaymentResponse response = serviceWithOutbox.processPaymentFromTripCompleted(
+                tripId, passengerId, zeroFare, correlationId, causationId
+        );
+
+        assertThat(response).isNotNull();
+        assertThat(response.status()).isEqualTo(PaymentStatus.FAILED);
+
+        verify(paymentRepository).save(any(PaymentEntity.class));
+        verify(paymentAttemptRepository).save(any(PaymentAttemptEntity.class));
+
+        ArgumentCaptor<OutboxEventEntity> outboxCaptor = ArgumentCaptor.forClass(OutboxEventEntity.class);
+        verify(mockOutboxRepo).save(outboxCaptor.capture());
+        OutboxEventEntity outboxEvent = outboxCaptor.getValue();
+        assertThat(outboxEvent.getEventType()).isEqualTo("payment.failed");
+        assertThat(outboxEvent.getAggregateType()).isEqualTo("PAYMENT");
+        assertThat(outboxEvent.getCorrelationId()).isEqualTo(correlationId);
+        assertThat(outboxEvent.getCausationId()).isEqualTo(causationId);
+        assertThat(outboxEvent.getPayload()).contains("INVALID_FARE_AMOUNT");
     }
 }
